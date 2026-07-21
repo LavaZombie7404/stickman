@@ -2387,9 +2387,47 @@ function drawParticles() {
   ctx.restore();
 }
 
+// ===== ciclu zi/noapte: cer cu gradient + soare/lună pe arc + stele =====
+let dayClock = Math.floor(Math.random() * 6000);
+const DAY_LEN = 9000; // ~2.5 min un ciclu complet
+let _stars = null, _starsW = 0;
+const SKY = [ // faze: [t, [topR,G,B], [botR,G,B]]
+  [0.00, [12, 12, 28], [22, 20, 44]],   // miezul nopții
+  [0.22, [58, 46, 92], [206, 120, 84]], // zori
+  [0.50, [40, 74, 116], [116, 162, 196]], // amiază (albastru domol)
+  [0.78, [60, 40, 88], [210, 108, 70]], // amurg
+  [1.00, [12, 12, 28], [22, 20, 44]],
+];
+function drawSky() {
+  const t = (dayClock % DAY_LEN) / DAY_LEN;
+  let a = SKY[0], b = SKY[1];
+  for (let i = 0; i < SKY.length - 1; i++) if (t >= SKY[i][0] && t <= SKY[i + 1][0]) { a = SKY[i]; b = SKY[i + 1]; break; }
+  const f = (t - a[0]) / ((b[0] - a[0]) || 1), mix = (i, j) => Math.round(a[j][i] + (b[j][i] - a[j][i]) * f);
+  const g = ctx.createLinearGradient(0, 0, 0, groundY);
+  g.addColorStop(0, `rgb(${mix(0, 1)},${mix(1, 1)},${mix(2, 1)})`); g.addColorStop(1, `rgb(${mix(0, 2)},${mix(1, 2)},${mix(2, 2)})`);
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, groundY);
+  const dayAlt = Math.sin((t - 0.25) * Math.PI * 2), night = clamp(-dayAlt, 0, 1);
+  // stele
+  if (night > 0.02) {
+    if (!_stars || _starsW !== W) { _starsW = W; _stars = []; for (let i = 0; i < 70; i++) _stars.push({ x: Math.random() * W, y: Math.random() * groundY * 0.75, r: 0.5 + Math.random(), p: Math.random() * 6 }); }
+    ctx.fillStyle = "#fff";
+    for (const s of _stars) { ctx.globalAlpha = night * (0.4 + 0.6 * Math.abs(Math.sin(frame * 0.03 + s.p))); ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2); ctx.fill(); }
+    ctx.globalAlpha = 1;
+  }
+  // soare (ziua) / lună (noaptea) pe arc
+  const cy = (prog) => groundY - 30 - Math.sin(prog * Math.PI) * (groundY - 90);
+  const sp = (t - 0.25) / 0.5;
+  if (sp >= 0 && sp <= 1) { const x = W * sp, y = cy(sp); ctx.save(); ctx.fillStyle = "rgba(255,220,120,0.25)"; ctx.beginPath(); ctx.arc(x, y, 40, 0, Math.PI * 2); ctx.fill(); ctx.fillStyle = "#ffd24d"; ctx.beginPath(); ctx.arc(x, y, 22, 0, Math.PI * 2); ctx.fill(); ctx.restore(); }
+  const mp = ((t + 0.25) % 1) / 0.5;
+  if (mp >= 0 && mp <= 1) { const x = W * mp, y = cy(mp); ctx.save(); ctx.fillStyle = "#e8ecff"; ctx.beginPath(); ctx.arc(x, y, 15, 0, Math.PI * 2); ctx.fill(); ctx.fillStyle = SKY_moonShade(t); ctx.beginPath(); ctx.arc(x + 6, y - 4, 13, 0, Math.PI * 2); ctx.fill(); ctx.restore(); }
+}
+function SKY_moonShade() { const t = (dayClock % DAY_LEN) / DAY_LEN; let a = SKY[0], b = SKY[1]; for (let i = 0; i < SKY.length - 1; i++) if (t >= SKY[i][0] && t <= SKY[i + 1][0]) { a = SKY[i]; b = SKY[i + 1]; break; } const f = (t - a[0]) / ((b[0] - a[0]) || 1), m = (i) => Math.round(a[1][i] + (b[1][i] - a[1][i]) * f); return `rgb(${m(0)},${m(1)},${m(2)})`; }
+
 function loop() {
   frame++;
+  dayClock++;
   ctx.clearRect(0, 0, W, H);
+  drawSky();
   drawTaskbar();
   drawWallpaper();
   agents.forEach(a => { if (a.inHouse && !a.away) a.draw(ctx); }); // cei care dorm în casă → sub structuri (pereții îi acoperă = par înăuntru)
