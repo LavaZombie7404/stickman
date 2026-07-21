@@ -198,13 +198,7 @@ class Agent {
   }
 
   wouldCollide(nx) {
-    if (this.jumping) return false;
-    for (const o of agents) {
-      if (o === this || o.away || o.jumping || o.state === "held" || o.state === "thrown") continue;
-      const gap = (o.state === "sleep" && o.lie > 0.3) ? 74 : 38; // cei culcați ocupă mai mult
-      if (Math.abs(nx - o.x) < gap && Math.abs(nx - o.x) < Math.abs(this.x - o.x)) return true;
-    }
-    return false;
+    return false; // stickmanii pot trece unul prin altul (fără blocaje, ca în AvM)
   }
 
   speak(text, ttl = 120, ambient = true) {
@@ -751,7 +745,7 @@ class Agent {
     } else {
       const jumpY = this.jumping ? Math.sin(this.jumpT * Math.PI) * 155 : 0;
       ctx.translate(Math.round(this.x - (this.recoil || 0) * this.face), Math.round(groundY) - jumpY);
-      if (this.lie > 0) ctx.rotate(this.lie * (Math.PI / 2) * this.sleepDir);
+      if (this.lie > 0) { ctx.translate(0, -this.lie * (this.c.headR + 2)); ctx.rotate(this.lie * (Math.PI / 2) * this.sleepDir); } // culcat: se ridică pe sol, nu intră în el
       // squash & stretch
       if (this.jumping) { const s = Math.sin(this.jumpT * Math.PI); scaleY = 1 + s * 0.12; scaleX *= 1 - s * 0.06; }
       if (this.squash > 0.02) { scaleY *= 1 - this.squash * 0.28; scaleX *= 1 + this.squash * 0.24; }
@@ -759,7 +753,7 @@ class Agent {
     ctx.scale(scaleX, scaleY);
 
     ctx.strokeStyle = c.color; ctx.fillStyle = c.color;
-    ctx.lineWidth = 6; ctx.lineCap = "round"; ctx.lineJoin = "round";
+    ctx.lineWidth = 4.5; ctx.lineCap = "round"; ctx.lineJoin = "round"; // linii mai subțiri (nu prea groase)
 
     this.drawSkeleton(ctx);
 
@@ -781,8 +775,8 @@ class Agent {
     const walking = (st === "walk" || st === "run" || st === "fight" || st === "leaving" || st === "scared" || (st === "watch" && !this.watchArrived) || (st === "gopaint" && this.gpPhase === "go") || (st === "climb" && this.climbPhase === "go") || (st === "climbwin" && this.climbPhase === "go") || (st === "sleep" && this.sleepPhase === "goto") || (st === "onwin" && this.onWinVX) || (st === "ondraw" && this.onDrawVX) || (st === "getweapon" && this._admire === undefined) || (st === "onstruct" && this.osPhase === "go") || (st === "onstruct" && this.osPhase === "stand" && this.osVX));
     const running = (st === "run" || st === "leaving" || st === "scared");
     const breathe = Math.sin(this.bob) * 1.5;
-    const bodyBob = walking ? Math.sin(this.walkPhase * 2) * 2 : breathe;
-    const lean = running ? 7 : (this.startle > 0 ? -5 : 0);
+    const bodyBob = walking ? Math.sin(this.walkPhase * 2) * 2.6 : breathe;   // săltăreț sincronizat cu pașii
+    const lean = running ? 9 : (walking ? 4 : (this.startle > 0 ? -5 : 0));    // se apleacă înainte când merge/aleargă
     const hipY = HIP_Y + bodyBob;
     const shX = lean, shY = SHOULDER_Y + bodyBob, asY = shY + 4;
     const headR = c.headR, headX = lean * 1.2, headY = shY - NECK - headR;
@@ -811,11 +805,12 @@ class Agent {
       this.legIK(ctx, -4, hipY, -6, 0, -1);
       this.legIK(ctx, 4, hipY, 6, 0, -1);
     } else {
-      const stride = running ? 22 : 15, liftH = running ? 24 : 14;
+      const stride = running ? 26 : 17, liftH = running ? 28 : 17;
       for (const side of [-1, 1]) {
         const p = this.walkPhase + (side < 0 ? 0 : Math.PI);
-        const footX = side * 4 + Math.sin(p) * stride;
-        const footY = -Math.max(0, Math.cos(p)) * liftH;
+        const lift = Math.max(0, Math.cos(p));         // piciorul din spate se ridică; cel din față stă plantat
+        const footX = side * 4 + Math.sin(p) * stride + lift * 4; // vârful piciorului trece puțin înainte la pas
+        const footY = -lift * lift * liftH;            // arc mai natural (ridicare rapidă, cădere lină)
         this.legIK(ctx, side * 3, hipY, footX, footY, -1);
       }
     }
@@ -855,12 +850,12 @@ class Agent {
     } else if (st === "sleep" && this.sleepPhase !== "goto") {
       seg(-12, 12, -18, 24); seg(12, 12, 18, 24);
     } else {
-      const amt = running ? 0.85 : (walking ? 0.55 : 0.12);
+      const amt = running ? 0.95 : (walking ? 0.62 : 0.12);
       for (const side of [-1, 1]) {
         const p = this.walkPhase + (side < 0 ? Math.PI : 0);
         const ang = Math.sin(p) * amt;
         const ex = Math.sin(ang) * UPPER, ey = Math.cos(ang) * UPPER;
-        const fa = ang + 0.35;
+        const fa = ang + 0.35 + Math.max(0, Math.sin(p)) * 0.45; // cotul se îndoaie mai mult la balansul înainte
         seg(ex, ey, ex + Math.sin(fa) * FORE, ey + Math.cos(fa) * FORE);
       }
     }
@@ -2095,6 +2090,8 @@ function removePlayers() {
 
 // tastatură: Notepad deschis → scrii în el; altfel comenzi joc (R/H/Space/A/D/săgeți)
 window.addEventListener("keydown", (e) => {
+  const el = e.target; // scrii într-un câmp (chat) → lasă tastele browserului (spații, litere), nu le fura pt. joc
+  if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable)) return;
   if (notepadWin) {
     const n = notepadWin; if (n.cursor === undefined) n.cursor = n.text.length;
     if (e.ctrlKey && (e.key === "e" || e.key === "E")) { runPython(n.text); e.preventDefault(); return; } // Ctrl+E = rulează
