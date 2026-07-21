@@ -176,6 +176,17 @@ class Agent {
     this.tz = groundY - (d.cy - d.s);            // rămâne pe top (chiar dacă desenul e mutat cândva)
     const lo = d.cx - d.s, hi = d.cx + d.s;      // marginile suprafeței
     if (--this.onDrawTimer <= 0) {
+      // PARKOUR: uneori sare spre alt desen din apropiere
+      const jumpTargets = drawings.filter(o => o !== d && Math.abs(o.cx - this.x) > 24 && Math.abs(o.cx - this.x) < 200);
+      if (jumpTargets.length && Math.random() < 0.55) {
+        const t = pick(jumpTargets), dx = t.cx - this.x;
+        this.onDraw = null; this.state = "thrown"; this.tangle = 0; this.tangVel = 0; this.bounces = 0;
+        this.tvx = clamp(dx / 20, -11, 11); this.tzv = -9;   // impuls în sus + spre țintă (arc de salt)
+        this.landDrawing = t; this.face = dx >= 0 ? 1 : -1;
+        this.squash = 0.5; spawnDust(this.x, groundY - this.tz, 4);
+        this.speak(pick(["Hop! 🤸", "Parkour!", "Săritură!", "Uite!"]), 60);
+        return;
+      }
       if (Math.random() < 0.5) { this.onDrawVX = (Math.random() < 0.5 ? -1 : 1) * this.speed; this.onDrawTimer = rand(50, 130); }
       else { this.onDrawVX = 0; this.onDrawTimer = rand(40, 100); }
     }
@@ -222,7 +233,7 @@ class Agent {
 
   grab() {
     this.state = "held";
-    this.landWin = null; this.landStruct = null; this.landDrawing = null;
+    this.landWin = null; this.landStruct = null; this.landDrawing = null; this.inHouse = null;
     this.heldY = Math.min(pointer.y, groundY);
     this.jumping = false; this.burning = false; this.building = null;
     this.lie = 0; this.sleepPhase = null; this.sleepCd = rand(3600, 18000); // se trezește dacă dormea
@@ -519,13 +530,13 @@ class Agent {
         if (!h || !structures.includes(h)) { this.sleepPhase = "down"; this.sleepDir = Math.random() < 0.5 ? 1 : -1; } // casa a dispărut → doarme pe loc
         else {
           const dx = h.x - this.x;
-          if (Math.abs(dx) < 14) { this.sleepPhase = "down"; this.sleepDir = Math.random() < 0.5 ? 1 : -1; this.speak("Zzz", 90); }
+          if (Math.abs(dx) < 14) { this.sleepPhase = "down"; this.sleepDir = Math.random() < 0.5 ? 1 : -1; this.x = h.x; this.inHouse = h; this.speak("Zzz", 90); } // intră ÎN casă
           else if (!this.jumping) { this.x += Math.sign(dx) * this.speed * 1.4; this.face = dx >= 0 ? 1 : -1; this.walkPhase += 0.14; }
         }
       }
       else if (this.sleepPhase === "down") { this.lie = Math.min(1, this.lie + 0.04); if (this.lie >= 1) { this.sleepPhase = "rest"; this.sleepTimer = 1200; } }
       else if (this.sleepPhase === "rest") { if (--this.sleepTimer <= 0) this.sleepPhase = "up"; else if (!this.say && Math.random() < 0.004) this.speak("Zzz", 110); }
-      else { this.lie = Math.max(0, this.lie - 0.05); if (this.lie <= 0) { this.state = "walk"; this.targetX = null; this.stateTimer = rand(80, 180); } }
+      else { this.lie = Math.max(0, this.lie - 0.05); if (this.lie <= 0) { this.state = "walk"; this.targetX = null; this.stateTimer = rand(80, 180); this.inHouse = null; } }
     }
     else if (this.state === "fight") {
       const o = this.opponent;
@@ -666,7 +677,7 @@ class Agent {
       if (keys.has("d") || keys.has("arrowright")) dir += 1;
       if (dir) {
         this.face = dir;
-        const sprint = keys.has("control") ? 1.9 : 1;                 // Ctrl = fugă (sprint)
+        const sprint = sprintHeld ? 1.9 : 1;                          // Ctrl/Shift = fugă (sprint)
         this.x += dir * this.speed * 2.4 * sprint;
         this.walkPhase += 0.16 * sprint;                              // picioarele se mișcă mai repede la sprint
         if (sprint > 1 && frame % 5 === 0) spawnDust(this.x, groundY, 2); // praf de sprint
@@ -758,7 +769,10 @@ class Agent {
     } else {
       const jumpY = this.jumping ? Math.sin(this.jumpT * Math.PI) * 155 : 0;
       ctx.translate(Math.round(this.x - (this.recoil || 0) * this.face), Math.round(groundY) - jumpY);
-      if (this.lie > 0) { ctx.translate(0, -this.lie * (this.c.headR + 2)); ctx.rotate(this.lie * (Math.PI / 2) * this.sleepDir); } // culcat: se ridică pe sol, nu intră în el
+      if (this.lie > 0) {
+        ctx.translate(0, -this.lie * (this.c.headR + 2)); ctx.rotate(this.lie * (Math.PI / 2) * this.sleepDir); // culcat: se ridică pe sol, nu intră în el
+        if (this.inHouse) { const fit = clamp(structBox(this.inHouse).hw / 175, 0.28, 1); const sc = 1 - this.lie * (1 - fit); scaleX *= sc; scaleY *= sc; } // se micșorează cât să încapă în casă
+      }
       // squash & stretch
       if (this.jumping) { const s = Math.sin(this.jumpT * Math.PI); scaleY = 1 + s * 0.12; scaleX *= 1 - s * 0.06; }
       if (this.squash > 0.02) { scaleY *= 1 - this.squash * 0.28; scaleX *= 1 + this.squash * 0.24; }
@@ -1072,6 +1086,7 @@ let challenger = null;                        // primul ales prin dublu-click
 let lastClick = { agent: null, time: 0 };     // pt. detectarea dublu-click-ului
 let player = null, playerCount = 0;           // stickman controlat de tine (tasta R)
 const keys = new Set();                        // taste apăsate (A/D/săgeți)
+let sprintHeld = false;                         // Ctrl sau Shift ținut → sprint (citit direct din event, robust)
 
 function resize() {
   const dpr = window.devicePixelRatio || 1;
@@ -1144,6 +1159,7 @@ function nearestAgent(cx, cy) {
 // ---- interacțiune: click = lovitură, ține & trage = apucă și aruncă, dreapta = chat ----
 window.addEventListener("mousedown", (e) => {
   if (e.button !== 0) return;
+  if (e.target === canvas) { const ae = document.activeElement; if (ae && ae !== document.body && ae.blur) ae.blur(); } // click pe joc → scoate focusul din chat, ca să meargă tastele (R/A/D/Ctrl/Space)
   pointer.down = true; pointer.downX = e.clientX; pointer.downY = e.clientY; pointer.moved = 0;
   if (minecraftWin) {
     const m = minecraftWin;
@@ -1229,7 +1245,7 @@ window.addEventListener("mousemove", (e) => {
 });
 window.addEventListener("mouseup", (e) => {
   if (e.button !== 0) return;
-  if (pointer.dragStruct) { pointer.dragStruct = null; pointer.down = false; return; }
+  if (pointer.dragStruct) { if (pointer.moved < 8) damageStructure(pointer.dragStruct.s); pointer.dragStruct = null; pointer.down = false; return; } // click (nu drag) = lovește/dărâmă
   if (pointer.resizeMc) { pointer.resizeMc = null; pointer.down = false; return; }
   if (pointer.dragMc) { pointer.dragMc = null; pointer.down = false; return; }
   if (pointer.mcBreaking) { pointer.mcBreaking = false; pointer.down = false; return; }
@@ -1320,6 +1336,18 @@ function standWindows() { const l = openWindows(); if (minecraftWin) l.push(mine
 // case/structuri: cutie de coliziune (pt. apucat) și hit-test
 function structBox(s) { const d = { house: [62, 138], tower: [34, 172], tree: [42, 122], campfire: [40, 56] }[s.type] || [50, 120]; const sc = s.scale || 1; return { hw: d[0] * sc, h: d[1] * sc }; }
 function structureAt(x, y) { for (let i = structures.length - 1; i >= 0; i--) { const s = structures[i], b = structBox(s), base = s.by || groundY; if (x >= s.x - b.hw && x <= s.x + b.hw && y >= base - b.h && y <= base) return s; } return null; }
+// lovește o construcție: cad blocuri de sus în jos; destule lovituri → dărâmată cu moloz
+function damageStructure(s) {
+  if (!s || !structures.includes(s)) return;
+  const b = structBox(s), base = s.by || groundY, top = base - b.h * Math.max(0, s.progress || 0);
+  spawnDust(s.x, top + 8, 10);
+  s.progress -= 0.34;
+  if (s.progress <= 0.06) { // dărâmată complet
+    spawnDust(s.x, base - 24, 18);
+    for (const a of agents) if (a.state === "onstruct" && a.onStruct === s) { a.onStruct = null; a.state = "thrown"; a.tz = groundY - top; a.tzv = 0; a.tvx = rand(-3, 3); a.tangle = 0; a.tangVel = 0; a.bounces = 0; } // cei de pe ea cad
+    const i = structures.indexOf(s); if (i >= 0) structures.splice(i, 1);
+  }
+}
 // bara de titlu a unei ferestre (pt. drag), exclude butonul de închidere din dreapta
 function titleBarAt(x, y) { for (const w of openWindows()) if (x >= w.x && x <= w.x + w.w - 30 && y >= w.y && y <= w.y + 28) return w; return null; }
 // mânerul de redimensionare (colț dreapta-jos)
@@ -2129,10 +2157,12 @@ window.addEventListener("keydown", (e) => {
   if (k === "h") { showHitboxes = !showHitboxes; return; }
   if (k === "g") { fxLevel = fxLevel < 0.05 ? 0.1 : (fxLevel < 0.2 ? 0.35 : (fxLevel < 0.6 ? 0.7 : 0)); return; } // intensitate shader WebGL
   if (k === " " || k === "spacebar") { if (player && !player.jumping && player.jumpCd <= 0) { player.jumping = true; player.jumpT = 0; } e.preventDefault(); return; }
-  if (k === "control") { keys.add("control"); return; } // Ctrl = fugă (sprint)
+  sprintHeld = e.ctrlKey || e.shiftKey; // Ctrl/Shift ținut = fugă (sprint)
+  if (k === "control" || k === "shift") { e.preventDefault(); return; }
   if (k === "a" || k === "d" || k === "arrowleft" || k === "arrowright") { keys.add(k); if (k.startsWith("arrow") || e.ctrlKey) e.preventDefault(); } // preventDefault la Ctrl+A/D ca să nu declanșeze scurtături de browser
 });
-window.addEventListener("keyup", (e) => { keys.delete(e.key.toLowerCase()); });
+window.addEventListener("keyup", (e) => { keys.delete(e.key.toLowerCase()); sprintHeld = e.ctrlKey || e.shiftKey; });
+window.addEventListener("blur", () => { keys.clear(); sprintHeld = false; }); // pierde focusul → nu rămâne blocat pe sprint/mers
 function drawHitboxes() {
   ctx.save();
   ctx.strokeStyle = "#ffffff"; ctx.lineWidth = 1.5; ctx.globalAlpha = 0.85;
@@ -2355,6 +2385,7 @@ function loop() {
   ctx.clearRect(0, 0, W, H);
   drawTaskbar();
   drawWallpaper();
+  agents.forEach(a => { if (a.inHouse && !a.away) a.draw(ctx); }); // cei care dorm în casă → sub structuri (pereții îi acoperă = par înăuntru)
   structures.forEach(drawStructure);
   drawWeapons(); // arme pe jos (de luat)
 
@@ -2384,7 +2415,7 @@ function loop() {
   drawResizeHandles();
   // stickmanii pe layerul cel mai în față — peste tot (cei ținuți în mână deasupra celorlalți)
   const onMc = (a) => minecraftWin && ((a.state === "onwin" && a.onWin === minecraftWin) || (a.state === "climbwin" && a.climbWin === minecraftWin));
-  [...agents].sort((a, b) => (a.state === "held" ? 1 : 0) - (b.state === "held" ? 1 : 0) || a.x - b.x).forEach(a => { if (!onMc(a)) a.draw(ctx); });
+  [...agents].sort((a, b) => (a.state === "held" ? 1 : 0) - (b.state === "held" ? 1 : 0) || a.x - b.x).forEach(a => { if (!onMc(a) && !a.inHouse) a.draw(ctx); }); // cei din casă deja desenați (sub structuri)
   drawArrows(); // săgeți în zbor
   drawMinecraft(); // acoperă tot când e deschis
   agents.forEach(a => { if (onMc(a)) a.draw(ctx); }); // cei care stau PE Minecraft — peste el
