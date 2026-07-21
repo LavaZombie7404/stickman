@@ -836,9 +836,15 @@ class Agent {
     const moveAmt = this.legMove;
     const bodyBob = breathe * (1 - moveAmt) + Math.sin(this.walkPhase * 2) * 2.6 * moveAmt; // săltăreț la mers, respirație la stat — topit
     const lean = this.startle > 0 ? -5 : (running ? 9 : 4) * moveAmt;                       // se apleacă înainte lin
+    // SECONDARY MOTION: capul & torsul rămân în urmă la accelerare/oprire/întoarcere (spring cu inerție = mișcare organică)
+    const vx2 = this.x - (this._sx2 === undefined ? this.x : this._sx2); this._sx2 = this.x;
+    const ax = vx2 - (this._svx || 0); this._svx = vx2;
+    this._hV = (this._hV || 0) - ax * 1.7 - (this._hO || 0) * 0.11 - (this._hV || 0) * 0.24;
+    this._hO = clamp((this._hO || 0) + this._hV, -12, 12);
+    const sway = this._hO * this.face + Math.sin(this.walkPhase) * 1.4 * moveAmt;            // inerție (cap în urmă) + legănare la pas
     const hipY = HIP_Y + bodyBob;
-    const shX = lean, shY = SHOULDER_Y + bodyBob, asY = shY + 4;
-    const headR = c.headR, headX = lean * 1.2, headY = shY - NECK - headR;
+    const shX = lean + sway * 0.4, shY = SHOULDER_Y + bodyBob, asY = shY + 4;                // torsul urmează 40% (efect de bici)
+    const headR = c.headR, headX = lean * 1.2 + sway, headY = shY - NECK - headR;            // capul rămâne în urmă cel mai mult
     const striking = st === "fight" && this.attackAnim > 0;
     const HANG = 32;
 
