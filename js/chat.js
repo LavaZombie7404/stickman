@@ -221,10 +221,22 @@ const chromeAI = {
 };
 chromeAI.detect();
 
-// alege backend-ul de răspuns: Claude (cheie) > AI Chrome local > scriptat
+// alege backend-ul de răspuns: Claude (cheie) > AI Chrome local > scriptat.
+// NU se agață niciodată: Chrome AI are timeout; dacă eșuează/încetinește, cade pe scriptat.
+const withTimeout = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error("timeout")), ms))]);
 async function aiReply(c, history, msg) {
   if (hasKey()) return await claudeReply(c, history);
-  if (chromeAI.ready) { try { return await chromeAI.reply(c, history); } catch (e) { return scriptedReply(c, msg); } }
+  if (chromeAI.ready) {
+    try {
+      const r = await withTimeout(chromeAI.reply(c, history), 12000);
+      if (r && r.trim() && r !== "(fără răspuns)") { chromeAI.fails = 0; return r.trim(); }
+      throw new Error("gol");
+    } catch (e) {
+      chromeAI.fails = (chromeAI.fails || 0) + 1;
+      if (chromeAI.fails >= 2) { chromeAI.ready = false; chromeAI.status = "none"; try { refreshBanner(); refreshGBanner(); } catch (_) {} } // renunță la Chrome AI dacă tot nu merge
+      return scriptedReply(c, msg); // răspuns garantat, nu rămâne pe "…"
+    }
+  }
   return scriptedReply(c, msg);
 }
 
