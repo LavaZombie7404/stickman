@@ -13,6 +13,7 @@ let particles = []; // praf la aterizare
 let drawings = [];  // desene pe wallpaper
 let weapons = [];   // arme desenate în Paint (sabie/arc), lăsate pe jos (de luat)
 let arrows = [];    // săgeți în zbor
+let orbs = [];      // orbi de energie (lupte stil Animator vs. Animation)
 
 // proporții schelet
 const HIP_Y = -52, THIGH = 26, SHIN = 26, TORSO = 44, NECK = 8, UPPER = 20, FORE = 18;
@@ -543,16 +544,21 @@ class Agent {
       if (!o) { this.state = "walk"; return; }
       const dx = o.x - this.x, d = Math.abs(dx) || 1;
       this.face = dx >= 0 ? 1 : -1;
-      const bow = this.weapon === "bow", wantD = bow ? 210 : 60;
+      const bow = this.weapon === "bow", ranged = bow || this._orbFight, wantD = bow ? 210 : (this._orbFight ? 160 : 60);
       if (d > wantD + 8) { this.x += Math.sign(dx) * (this.speed + 0.5); this.walkPhase += 0.16; }
-      else if (d < wantD - 8 && !bow) { // corp la corp: nu se suprapun
+      else if (d < wantD - 8 && !ranged) { // corp la corp: nu se suprapun
         const s = dx !== 0 ? Math.sign(dx) : (agents.indexOf(this) < agents.indexOf(o) ? 1 : -1);
         this.x -= s * (this.speed + 0.5); this.walkPhase += 0.13;
       }
       else if (this.attacker && this.punchTimer-- <= 0) {
-        this.punchTimer = rand(bow ? 45 : 30, bow ? 70 : 50);
+        this.punchTimer = rand(ranged ? 42 : 30, ranged ? 74 : 50);
         this.attackAnim = 16;
         if (bow) { this.attackType = "bow"; arrows.push({ x: this.x + this.face * 20, y: groundY - 96, vx: this.face * 9, foe: o, life: 160 }); }
+        else if (this._orbFight) { // AvM: aruncă un orb de energie de culoarea lui
+          this.attackType = "orb";
+          orbs.push({ x: this.x + this.face * 22, y: groundY - 96, vx: this.face * 6, vy: -1, foe: o, life: 130, color: this.c.color, r: 9, trail: [], burst: null });
+          this.speak(pick(["Hah!", "Energie!", "Ia asta!", "Puterea!"]), 40);
+        }
         else {
           this.attackType = this.weapon === "sword" ? "punch" : (Math.random() < 0.5 ? "punch" : "kick");
           o.recoil = this.attackType === "kick" ? 18 : 14;
@@ -1067,6 +1073,7 @@ let showHitboxes = false;
 let taskIcons = [];         // iconițele din taskbar (pt. click)
 let browserWin = null;      // fereastra Chrome deschisă
 let stopwatchWin = null;    // fereastra cronometru
+let settingsWin = null;     // fereastra Setări
 let notepadWin = null;      // fereastra notepad
 let paintWin = null;        // fereastra MS Paint
 let minecraftWin = null;    // modul Minecraft 2D
@@ -1308,6 +1315,13 @@ function handleUIClick(x, y) {
     if (p._clear) { const b = p._clear; if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) { p.strokes = []; return true; } }
     if (x >= p.x && x <= p.x + p.w && y >= p.y && y <= p.y + p.h) return true;
   }
+  // Setări
+  if (settingsWin) {
+    const s = settingsWin;
+    if (s._xb) { const b = s._xb; if (x >= b.x && x <= b.x + b.s && y >= b.y && y <= b.y + b.s) { closeSettings(); return true; } }
+    if (s._opts) for (const o of s._opts) { if (x >= o.x && x <= o.x + o.w && y >= o.y && y <= o.y + o.h) { setBg(o.id); return true; } }
+    if (x >= s.x && x <= s.x + s.w && y >= s.y && y <= s.y + s.h) return true;
+  }
   // Chrome
   if (browserWin && browserWin._xb) { const b = browserWin._xb; if (x >= b.x && x <= b.x + b.s && y >= b.y && y <= b.y + b.s) { closeChrome(); return true; } }
   if (browserWin) { const b = browserWin; if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) return true; }
@@ -1319,6 +1333,7 @@ function iconAction(name) {
   else if (name === "minecraft") { if (minecraftWin) closeMinecraft(); else openMinecraft(); }
   else if (name === "lol") triggerRandomFight();
   else if (name === "stopwatch") openStopwatch();
+  else if (name === "settings") { if (settingsWin) closeSettings(); else openSettings(); }
   else if (name === "notepad") openNotepad();
   else if (name === "paint") openPaint();
   else if (name === "start") pick([openChrome, triggerBuild, triggerRandomFight])();
@@ -1334,7 +1349,7 @@ function sendToPaint(a) {
 }
 function closePaint() { paintWin = null; }
 // ferestrele pe care stickmanii se pot urca (nu Minecraft — e fullscreen cu lumea lui)
-function openWindows() { const l = []; if (browserWin) l.push(browserWin); if (stopwatchWin) l.push(stopwatchWin); if (notepadWin) l.push(notepadWin); if (paintWin) l.push(paintWin); return l; }
+function openWindows() { const l = []; if (browserWin) l.push(browserWin); if (stopwatchWin) l.push(stopwatchWin); if (settingsWin) l.push(settingsWin); if (notepadWin) l.push(notepadWin); if (paintWin) l.push(paintWin); return l; }
 // ferestre pe care se poate STA/urca — include Minecraft (dar Minecraft are drag/resize propriu)
 function standWindows() { const l = openWindows(); if (minecraftWin) l.push(minecraftWin); return l; }
 // case/structuri: cutie de coliziune (pt. apucat) și hit-test
@@ -1551,6 +1566,40 @@ function updateArrows() {
 function drawArrows() {
   ctx.save(); ctx.strokeStyle = "#caa46a"; ctx.lineWidth = 2.5; ctx.lineCap = "round"; ctx.lineJoin = "round";
   for (const a of arrows) { const d = Math.sign(a.vx) || 1; ctx.beginPath(); ctx.moveTo(a.x - d * 14, a.y); ctx.lineTo(a.x, a.y); ctx.stroke(); ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(a.x - d * 6, a.y - 4); ctx.moveTo(a.x, a.y); ctx.lineTo(a.x - d * 6, a.y + 4); ctx.stroke(); }
+  ctx.restore();
+}
+// orbi de energie (stil Animator vs. Animation): zboară cu urmărire ușoară, dâră + explozie la impact
+function updateOrbs() {
+  for (let i = orbs.length - 1; i >= 0; i--) {
+    const o = orbs[i];
+    if (o.burst != null) { if (--o.life <= 0) orbs.splice(i, 1); continue; }
+    const f = o.foe, ty = groundY - 96;
+    if (f && !f.away) { o.vx += Math.sign(f.x - o.x) * 0.35; o.vx = clamp(o.vx, -11, 11); o.vy += ((ty - o.y) * 0.03 - o.vy) * 0.25; }
+    o.x += o.vx; o.y += o.vy; o.life--;
+    o.trail.push({ x: o.x, y: o.y }); if (o.trail.length > 8) o.trail.shift();
+    if (f && !f.away && f.state !== "held" && f.state !== "dead" && Math.abs(o.x - f.x) < 24 && Math.abs(o.y - ty) < 42) {
+      f.recoil = 20; f.stars = [{ ang: 0, r: 24 }, { ang: 2, r: 24 }, { ang: 4, r: 24 }]; f.squash = 1;
+      if (f.state !== "dead" && Math.random() < 0.3) f.die(); else if (!f.say) f.speak(pick(f.c.hitLines), 45);
+      o.burst = frame; o.life = 15; o.trail = [];
+      continue;
+    }
+    if (o.life <= 0 || o.x < -40 || o.x > W + 40) orbs.splice(i, 1);
+  }
+}
+function drawOrbs() {
+  ctx.save();
+  for (const o of orbs) {
+    if (o.burst != null) { // explozie: inel care se extinde + scântei
+      const p = 1 - o.life / 15, R = 8 + p * 36;
+      ctx.globalAlpha = (1 - p) * 0.9; ctx.strokeStyle = o.color; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(o.x, o.y, R, 0, Math.PI * 2); ctx.stroke();
+      ctx.fillStyle = o.color; for (let k = 0; k < 9; k++) { const a = k / 9 * Math.PI * 2; ctx.beginPath(); ctx.arc(o.x + Math.cos(a) * R, o.y + Math.sin(a) * R, 2.6 * (1 - p), 0, Math.PI * 2); ctx.fill(); }
+      continue;
+    }
+    for (let k = 0; k < o.trail.length; k++) { const tp = o.trail[k]; ctx.globalAlpha = (k / o.trail.length) * 0.45; ctx.fillStyle = o.color; ctx.beginPath(); ctx.arc(tp.x, tp.y, o.r * (0.3 + 0.5 * k / o.trail.length), 0, Math.PI * 2); ctx.fill(); }
+    ctx.globalAlpha = 1; ctx.shadowColor = o.color; ctx.shadowBlur = 16;
+    ctx.fillStyle = o.color; ctx.beginPath(); ctx.arc(o.x, o.y, o.r, 0, Math.PI * 2); ctx.fill();
+    ctx.shadowBlur = 0; ctx.globalAlpha = 0.95; ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.arc(o.x, o.y, o.r * 0.5, 0, Math.PI * 2); ctx.fill();
+  }
   ctx.restore();
 }
 function drawDoodle(d, reveal) {
@@ -1893,6 +1942,37 @@ function drawStopwatch() {
   ctx.textBaseline = "alphabetic";
   ctx.restore();
 }
+// ---- aplicația Setări (fundal) ----
+function openSettings() { const w = 330, h = 254, y = 110; settingsWin = { x: Math.round(W / 2 - w / 2), y, w, h }; }
+function closeSettings() { settingsWin = null; }
+const BG_OPTS = [{ id: "daynight", label: "🌅 Zi / Noapte" }, { id: "alan", label: "🎬 Alan Becker" }, { id: "black", label: "⬛ Negru" }, { id: "winxp", label: "🪟 Windows XP" }];
+function drawSettings() {
+  if (!settingsWin) return;
+  const s = settingsWin;
+  ctx.save();
+  ctx.shadowColor = "rgba(0,0,0,0.55)"; ctx.shadowBlur = 24; ctx.shadowOffsetY = 8;
+  ctx.fillStyle = "#202124"; rr(s.x, s.y, s.w, s.h, 12); ctx.fill();
+  ctx.shadowColor = "transparent"; ctx.shadowBlur = 0; ctx.shadowOffsetY = 0;
+  ctx.fillStyle = "#35363a"; rr(s.x, s.y, s.w, 28, 12); ctx.fill(); ctx.fillRect(s.x, s.y + 16, s.w, 12);
+  ctx.fillStyle = "#e8ecff"; ctx.font = "12px 'Segoe UI', sans-serif"; ctx.textAlign = "left"; ctx.textBaseline = "alphabetic"; ctx.fillText("⚙️ Setări", s.x + 12, s.y + 19);
+  const xb = { x: s.x + s.w - 24, y: s.y + 6, s: 18 }; s._xb = xb;
+  const hov = pointer.x >= xb.x && pointer.x <= xb.x + xb.s && pointer.y >= xb.y && pointer.y <= xb.y + xb.s;
+  ctx.fillStyle = hov ? "#e81123" : "#4a4b50"; rr(xb.x, xb.y, xb.s, xb.s, 5); ctx.fill();
+  ctx.strokeStyle = "#fff"; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(xb.x + 5, xb.y + 5); ctx.lineTo(xb.x + xb.s - 5, xb.y + xb.s - 5); ctx.moveTo(xb.x + xb.s - 5, xb.y + 5); ctx.lineTo(xb.x + 5, xb.y + xb.s - 5); ctx.stroke();
+  ctx.fillStyle = "#9aa3c0"; ctx.font = "11px 'Segoe UI', sans-serif"; ctx.fillText("FUNDAL", s.x + 15, s.y + 50);
+  const gx = s.x + 15, gy = s.y + 60, gap = 10, gw = (s.w - 30 - gap) / 2, gh = 60;
+  s._opts = [];
+  BG_OPTS.forEach((o, i) => {
+    const bx = gx + (i % 2) * (gw + gap), by = gy + Math.floor(i / 2) * (gh + gap), sel = getBg() === o.id;
+    const oh = pointer.x >= bx && pointer.x <= bx + gw && pointer.y >= by && pointer.y <= by + gh;
+    ctx.fillStyle = sel ? "#274a70" : (oh ? "#32343c" : "#2a2c32"); rr(bx, by, gw, gh, 9); ctx.fill();
+    if (sel) { ctx.strokeStyle = "#5aa0e0"; ctx.lineWidth = 2; rr(bx, by, gw, gh, 9); ctx.stroke(); }
+    ctx.fillStyle = "#e8ecff"; ctx.font = "13px 'Segoe UI', sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText(o.label, bx + gw / 2, by + gh / 2);
+    ctx.textBaseline = "alphabetic";
+    s._opts.push({ id: o.id, x: bx, y: by, w: gw, h: gh });
+  });
+  ctx.restore();
+}
 function openChrome(auto) {
   const y = 80, w = Math.min(660, W - 40), h = Math.min(440, groundY - y - 40);
   const vid = pick(VIDEOS);
@@ -2022,7 +2102,7 @@ function fightSelect(a) {
   else { startFightBetween(challenger, a); challenger = null; }
 }
 function startFightBetween(a, b) {
-  for (const x of [a, b]) { x.lie = 0; x.sleepPhase = null; x.jumping = false; x.building = null; if (x.opponent) x.endFight(); }
+  for (const x of [a, b]) { x.lie = 0; x.sleepPhase = null; x.jumping = false; x.building = null; if (x.opponent) x.endFight(); x._orbFight = !x.weapon && Math.random() < 0.55; } // ~jumătate luptă cu energie (AvM)
   a.startFight(b);
   b.opponent = a; b.state = "fight"; b.stateTimer = a.stateTimer; b.attacker = false; b.speak(pick(b.c.fightLines), 90);
 }
@@ -2168,8 +2248,6 @@ window.addEventListener("keydown", (e) => {
 });
 window.addEventListener("keyup", (e) => { keys.delete(e.key.toLowerCase()); sprintHeld = e.ctrlKey || e.shiftKey; });
 window.addEventListener("blur", () => { keys.clear(); sprintHeld = false; }); // pierde focusul → nu rămâne blocat pe sprint/mers
-// împiedică închiderea accidentală a tab-ului (Ctrl+W etc.) — browserul cere confirmare. Auto-reload-ul trece prin (setează window.__allowReload).
-window.addEventListener("beforeunload", (e) => { if (!window.__allowReload) { e.preventDefault(); e.returnValue = ""; } });
 function drawHitboxes() {
   ctx.save();
   ctx.strokeStyle = "#ffffff"; ctx.lineWidth = 1.5; ctx.globalAlpha = 0.85;
@@ -2226,7 +2304,7 @@ function drawTaskbar() {
   ctx.strokeStyle = "rgba(255,255,255,0.18)"; ctx.lineWidth = 2;
   ctx.beginPath(); ctx.moveTo(0, groundY); ctx.lineTo(W, groundY); ctx.stroke();
   const s = Math.min(48, bh - 30);
-  const icons = [["search", drawSearchIcon], ["chrome", drawChromeIcon], ["minecraft", drawMinecraftIcon], ["lol", drawLoLIcon], ["stopwatch", drawStopwatchIcon], ["notepad", drawNotepadIcon], ["paint", drawPaintIcon]];
+  const icons = [["search", drawSearchIcon], ["chrome", drawChromeIcon], ["minecraft", drawMinecraftIcon], ["lol", drawLoLIcon], ["stopwatch", drawStopwatchIcon], ["settings", drawSettingsIcon], ["notepad", drawNotepadIcon], ["paint", drawPaintIcon]];
   const gap = s * 0.55;
   const totalW = icons.length * s + (icons.length - 1) * gap;
   const cy = groundY + bh / 2 + 2;
@@ -2296,6 +2374,16 @@ function drawStopwatchIcon(cx, cy, s) {
   ctx.beginPath(); ctx.moveTo(cx - s * 0.08, ccy - r - s * 0.08); ctx.lineTo(cx + s * 0.08, ccy - r - s * 0.08); ctx.stroke(); // buton sus
   ctx.beginPath(); ctx.moveTo(cx, ccy - r - s * 0.02); ctx.lineTo(cx, ccy - r - s * 0.1); ctx.stroke();
   ctx.beginPath(); ctx.moveTo(cx, ccy); ctx.lineTo(cx, ccy - r * 0.6); ctx.moveTo(cx, ccy); ctx.lineTo(cx + r * 0.5, ccy + r * 0.2); ctx.stroke(); // ace
+}
+function drawSettingsIcon(cx, cy, s) {
+  iconBg(cx, cy, s, "#3a3f52");
+  ctx.strokeStyle = "#dfe4f5"; ctx.lineWidth = Math.max(2, s * 0.05); ctx.lineCap = "round";
+  const r = s * 0.22;
+  ctx.save(); ctx.translate(cx, cy);
+  for (let i = 0; i < 8; i++) { const a = i / 8 * Math.PI * 2; ctx.beginPath(); ctx.moveTo(Math.cos(a) * r, Math.sin(a) * r); ctx.lineTo(Math.cos(a) * (r + s * 0.11), Math.sin(a) * (r + s * 0.11)); ctx.stroke(); }
+  ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2); ctx.stroke();
+  ctx.beginPath(); ctx.arc(0, 0, r * 0.42, 0, Math.PI * 2); ctx.stroke();
+  ctx.restore();
 }
 function drawNotepadIcon(cx, cy, s) {
   const w = s * 0.62, h = s * 0.78, x0 = cx - w / 2, y0 = cy - h / 2;
@@ -2398,7 +2486,29 @@ const SKY = [ // faze: [t, [topR,G,B], [botR,G,B]]
   [0.78, [60, 40, 88], [210, 108, 70]], // amurg
   [1.00, [12, 12, 28], [22, 20, 44]],
 ];
+let bgMode = "daynight";
+try { bgMode = localStorage.getItem("stick_bg") || "daynight"; } catch (e) {}
+window.setBg = (m) => { bgMode = m; try { localStorage.setItem("stick_bg", m); } catch (e) {} };
+window.getBg = () => bgMode;
+function drawWinXP() { // Windows XP „Bliss"
+  const g = ctx.createLinearGradient(0, 0, 0, groundY); g.addColorStop(0, "#2f6fc8"); g.addColorStop(0.55, "#5a9be5"); g.addColorStop(1, "#a7d3f2");
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, groundY);
+  ctx.fillStyle = "rgba(255,255,255,0.85)";
+  for (const [x, y, r] of [[W * 0.18, groundY * 0.22, 20], [W * 0.68, groundY * 0.15, 26], [W * 0.85, groundY * 0.3, 16]]) { ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.arc(x + r, y + 4, r * 0.8, 0, Math.PI * 2); ctx.arc(x - r, y + 4, r * 0.7, 0, Math.PI * 2); ctx.fill(); }
+  ctx.fillStyle = "#5b8f2f"; ctx.beginPath(); ctx.moveTo(0, groundY); ctx.bezierCurveTo(W * 0.3, groundY - 66, W * 0.65, groundY - 16, W, groundY - 46); ctx.lineTo(W, groundY); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = "#7cb342"; ctx.beginPath(); ctx.moveTo(0, groundY); ctx.bezierCurveTo(W * 0.28, groundY - 34, W * 0.72, groundY - 82, W, groundY - 26); ctx.lineTo(W, groundY); ctx.closePath(); ctx.fill();
+}
+function drawAlanBg() { // desktopul din Animator vs. Animation (pânză deschisă)
+  const g = ctx.createLinearGradient(0, 0, 0, groundY); g.addColorStop(0, "#f2f5f9"); g.addColorStop(1, "#cfd8e6");
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, groundY);
+  ctx.strokeStyle = "rgba(90,110,150,0.10)"; ctx.lineWidth = 1; // grilaj fin de „foaie"
+  for (let x = 40; x < W; x += 40) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, groundY); ctx.stroke(); }
+  for (let y = 40; y < groundY; y += 40) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); }
+}
 function drawSky() {
+  if (bgMode === "black") { ctx.fillStyle = "#0a0a12"; ctx.fillRect(0, 0, W, groundY); return; }
+  if (bgMode === "winxp") { drawWinXP(); return; }
+  if (bgMode === "alan") { drawAlanBg(); return; }
   const t = (dayClock % DAY_LEN) / DAY_LEN;
   let a = SKY[0], b = SKY[1];
   for (let i = 0; i < SKY.length - 1; i++) if (t >= SKY[i][0] && t <= SKY[i + 1][0]) { a = SKY[i]; b = SKY[i + 1]; break; }
@@ -2450,11 +2560,13 @@ function loop() {
   maybeStartFight();
   agents.forEach(a => a.update(W));
   updateArrows();
+  updateOrbs();
   updateMinecraft();
   drawParticles();
   drawGroundTexts();
   drawBrowser();
   drawStopwatch();
+  drawSettings();
   drawNotepad();
   drawPaint();
   drawResizeHandles();
@@ -2462,6 +2574,7 @@ function loop() {
   const onMc = (a) => minecraftWin && ((a.state === "onwin" && a.onWin === minecraftWin) || (a.state === "climbwin" && a.climbWin === minecraftWin));
   [...agents].sort((a, b) => (a.state === "held" ? 1 : 0) - (b.state === "held" ? 1 : 0) || a.x - b.x).forEach(a => { if (!onMc(a) && !a.inHouse) a.draw(ctx); }); // cei din casă deja desenați (sub structuri)
   drawArrows(); // săgeți în zbor
+  drawOrbs();   // orbi de energie (AvM)
   drawMinecraft(); // acoperă tot când e deschis
   agents.forEach(a => { if (onMc(a)) a.draw(ctx); }); // cei care stau PE Minecraft — peste el
   if (showHitboxes) drawHitboxes();
