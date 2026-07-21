@@ -781,18 +781,21 @@ class Agent {
 
     // origine + transformări în funcție de stare
     ctx.save();
-    let scaleX = this.face, scaleY = 1;
+    // orientare LINĂ: se întoarce smooth (scaleX trece prin 0) în loc de flip instant
+    if (this.faceLerp === undefined) this.faceLerp = this.face;
+    this.faceLerp += (this.face - this.faceLerp) * 0.3;
+    let scaleX = this.faceLerp, scaleY = 1;
     if (this.state === "held") {
       ctx.translate(pointer.x, this.heldY);
     } else if (this.state === "thrown") {
       ctx.translate(this.x, groundY - this.tz);
       ctx.rotate(this.tangle);
     } else if (this.state === "climb" || this.state === "climbwin" || this.state === "onwin" || this.state === "onstruct" || this.state === "ondraw" || (this.isPlayer && this.tz > 0.5) || (this.state === "gopaint" && this.tz > 0)) {
-      ctx.translate(Math.round(this.x), Math.round(groundY - this.tz));
+      ctx.translate(this.x, groundY - this.tz); // sub-pixel (fără rotunjire = mișcare lină)
       if (this.squash > 0.02) { scaleY *= 1 - this.squash * 0.28; scaleX *= 1 + this.squash * 0.24; }
     } else {
       const jumpY = this.jumping ? Math.sin(this.jumpT * Math.PI) * 155 : 0;
-      ctx.translate(Math.round(this.x - (this.recoil || 0) * this.face), Math.round(groundY) - jumpY);
+      ctx.translate(this.x - (this.recoil || 0) * this.face, groundY - jumpY); // sub-pixel
       if (this.lie > 0) {
         ctx.translate(0, -this.lie * (this.c.headR + 2)); ctx.rotate(this.lie * (Math.PI / 2) * this.sleepDir); // culcat: se ridică pe sol, nu intră în el
         if (this.inHouse) { const fit = clamp(structBox(this.inHouse).hw / 175, 0.28, 1); const sc = 1 - this.lie * (1 - fit); scaleX *= sc; scaleY *= sc; } // se micșorează cât să încapă în casă
@@ -826,8 +829,13 @@ class Agent {
     const walking = (st === "walk" || st === "run" || st === "fight" || st === "leaving" || st === "scared" || (st === "watch" && !this.watchArrived) || (st === "gopaint" && this.gpPhase === "go") || (st === "climb" && this.climbPhase === "go") || (st === "climbwin" && this.climbPhase === "go") || (st === "sleep" && this.sleepPhase === "goto") || (st === "onwin" && this.onWinVX) || (st === "ondraw" && this.onDrawVX) || (st === "getweapon" && this._admire === undefined) || (st === "onstruct" && this.osPhase === "go") || (st === "onstruct" && this.osPhase === "stand" && this.osVX));
     const running = (st === "run" || st === "leaving" || st === "scared");
     const breathe = Math.sin(this.bob) * 1.5;
-    const bodyBob = walking ? Math.sin(this.walkPhase * 2) * 2.6 : breathe;   // săltăreț sincronizat cu pașii
-    const lean = running ? 9 : (walking ? 4 : (this.startle > 0 ? -5 : 0));    // se apleacă înainte când merge/aleargă
+    // NETEZIRE: moveAmt trece LIN între stat (0) și mers (1) → nicio schimbare bruscă de poză
+    const moveTarget = walking ? 1 : 0;
+    if (this.legMove === undefined) this.legMove = moveTarget;
+    this.legMove += (moveTarget - this.legMove) * 0.16;
+    const moveAmt = this.legMove;
+    const bodyBob = breathe * (1 - moveAmt) + Math.sin(this.walkPhase * 2) * 2.6 * moveAmt; // săltăreț la mers, respirație la stat — topit
+    const lean = this.startle > 0 ? -5 : (running ? 9 : 4) * moveAmt;                       // se apleacă înainte lin
     const hipY = HIP_Y + bodyBob;
     const shX = lean, shY = SHOULDER_Y + bodyBob, asY = shY + 4;
     const headR = c.headR, headX = lean * 1.2, headY = shY - NECK - headR;
@@ -852,15 +860,13 @@ class Agent {
       const sway = Math.sin(this.bob * 2) * 6;
       this.legIK(ctx, -3, hipY, -6 + sway, hipY + 48, -1);
       this.legIK(ctx, 3, hipY, 9 + sway, hipY + 48, -1);
-    } else if ((st === "sleep" && this.sleepPhase !== "goto") || st === "build" || st === "idle" || painting || (st === "watch" && this.watchArrived) || (st === "onwin" && !this.onWinVX) || (st === "ondraw" && !this.onDrawVX) || (st === "getweapon" && this._admire !== undefined) || (st === "onstruct" && this.osPhase === "stand" && !this.osVX)) {
-      this.legIK(ctx, -4, hipY, -6, 0, -1);
-      this.legIK(ctx, 4, hipY, 6, 0, -1);
     } else {
-      const stride = running ? 26 : 17, liftH = running ? 28 : 17;
+      // mers ↔ stat topit prin moveAmt (la 0 = picioare pe loc, la 1 = pas complet)
+      const stride = (running ? 26 : 17) * moveAmt, liftH = (running ? 28 : 17) * moveAmt;
       for (const side of [-1, 1]) {
         const p = this.walkPhase + (side < 0 ? 0 : Math.PI);
         const lift = Math.max(0, Math.cos(p));         // piciorul din spate se ridică; cel din față stă plantat
-        const footX = side * 4 + Math.sin(p) * stride + lift * 4; // vârful piciorului trece puțin înainte la pas
+        const footX = side * 5 + Math.sin(p) * stride + lift * 4 * moveAmt; // ușor lateral la stat, pas la mers
         const footY = -lift * lift * liftH;            // arc mai natural (ridicare rapidă, cădere lină)
         this.legIK(ctx, side * 3, hipY, footX, footY, -1);
       }
@@ -901,7 +907,7 @@ class Agent {
     } else if (st === "sleep" && this.sleepPhase !== "goto") {
       seg(-12, 12, -18, 24); seg(12, 12, 18, 24);
     } else {
-      const amt = running ? 0.95 : (walking ? 0.62 : 0.12);
+      const amt = 0.12 + (running ? 0.83 : 0.5) * moveAmt; // balans braț topit între stat și mers
       for (const side of [-1, 1]) {
         const p = this.walkPhase + (side < 0 ? Math.PI : 0);
         const ang = Math.sin(p) * amt;
@@ -958,11 +964,11 @@ class Agent {
 
   drawFx(ctx) {
     // picioarele urmează elevația (urcat pe clădiri/ferestre/desene, aruncat, ținut, salt) — la fel ca la corp în draw()
-    let feetY = Math.round(groundY);
-    if (this.state === "held") feetY = Math.round(this.heldY);
-    else if (this.state === "thrown" || this.state === "climb" || this.state === "climbwin" || this.state === "onwin" || this.state === "onstruct" || this.state === "ondraw" || (this.isPlayer && this.tz > 0.5) || (this.state === "gopaint" && this.tz > 0)) feetY = Math.round(groundY - this.tz);
-    else if (this.jumping) feetY = Math.round(groundY - Math.sin(this.jumpT * Math.PI) * 155);
-    const x = Math.round(this.x);
+    let feetY = groundY; // sub-pixel (fără rotunjire = mișcare lină)
+    if (this.state === "held") feetY = this.heldY;
+    else if (this.state === "thrown" || this.state === "climb" || this.state === "climbwin" || this.state === "onwin" || this.state === "onstruct" || this.state === "ondraw" || (this.isPlayer && this.tz > 0.5) || (this.state === "gopaint" && this.tz > 0)) feetY = groundY - this.tz;
+    else if (this.jumping) feetY = groundY - Math.sin(this.jumpT * Math.PI) * 155;
+    const x = this.x;
     const headTopScreen = feetY - 150;
 
     // marcaj „TU" deasupra jucătorului controlat (ca să-l recunoști printre clone)
