@@ -677,21 +677,31 @@ class Agent {
     if (keys.has("a") || keys.has("arrowleft")) dir -= 1;
     if (keys.has("d") || keys.has("arrowright")) dir += 1;
     if (dir) { this.face = dir; this.x += dir * this.speed * 2.4 * sprint; this.walkPhase += 0.16 * sprint; if (sprint > 1 && this.tz <= 0 && frame % 5 === 0) spawnDust(this.x, groundY, 2); }
-    // PARKOUR: fizică verticală cu platforme = desenele din fundal
-    const platTz = (d) => groundY - (d.cy - d.s);              // nivelul tz al vârfului desenului
-    const inX = (d) => this.x >= d.cx - d.s && this.x <= d.cx + d.s;
-    const grounded = this.tz <= 0 || (this.onPlat && drawings.includes(this.onPlat) && inX(this.onPlat) && Math.abs(this.tz - platTz(this.onPlat)) < 3);
+    // PARKOUR: fizică verticală cu platforme = desenele din fundal + structurile (case/turnuri/copaci)
+    const platOf = (ref) => {
+      if (!ref) return null;
+      if (drawings.includes(ref)) return { tz: groundY - (ref.cy - ref.s), x0: ref.cx - ref.s, x1: ref.cx + ref.s };
+      if (structures.includes(ref)) { const b = structBox(ref), base = ref.by || groundY; return { tz: groundY - (base - b.h), x0: ref.x - b.hw, x1: ref.x + b.hw }; }
+      return null;
+    };
+    const cur = platOf(this.onPlat);
+    const grounded = this.tz <= 0 || (cur && this.x >= cur.x0 && this.x <= cur.x1 && Math.abs(this.tz - cur.tz) < 3);
     if (this.wantJump) { this.wantJump = false; if (grounded && this.jumpCd <= 0) { this.pzv = 13.5; this.jumpCd = 8; this.onPlat = null; this.squash = 1; spawnDust(this.x, groundY - this.tz, 4); } }
+    if (this.wantHighJump) { this.wantHighJump = false; if (grounded || (this.tz > 0 && !this._hjUsed)) { this.pzv = 21; this._hjUsed = true; this.jumpCd = 8; this.onPlat = null; this.squash = 1; spawnDust(this.x, groundY - this.tz, 7); this.speak(pick(["Sus! 🚀", "Hopa!", "Zbor!"]), 40); } } // dublu-space = salt înalt
     const prevTz = this.tz;
     this.pzv = (this.pzv || 0) - 0.9;                          // gravitație
     this.tz += this.pzv;
-    if (this.pzv <= 0) {                                       // coboară → aterizează pe cel mai înalt desen de sub picioare
+    if (this.pzv <= 0) {                                       // coboară → aterizează pe cea mai înaltă platformă de sub picioare
       let bestTz = -1, best = null;
-      for (const d of drawings) { if (!inX(d)) continue; const pt = platTz(d); if (pt > 0 && prevTz >= pt - 2 && this.tz <= pt && pt > bestTz) { bestTz = pt; best = d; } }
+      const plats = [];
+      for (const d of drawings) plats.push([groundY - (d.cy - d.s), d.cx - d.s, d.cx + d.s, d]);
+      for (const s of structures) { const b = structBox(s), base = s.by || groundY; plats.push([groundY - (base - b.h), s.x - b.hw, s.x + b.hw, s]); }
+      for (const [pt, x0, x1, ref] of plats) { if (this.x < x0 || this.x > x1) continue; if (pt > 0 && prevTz >= pt - 2 && this.tz <= pt && pt > bestTz) { bestTz = pt; best = ref; } }
       if (best) { this.tz = bestTz; this.pzv = 0; this.onPlat = best; if (prevTz - bestTz > 6) { this.squash = 1; spawnDust(this.x, groundY - this.tz, 4); } }
     }
-    if (this.tz <= 0) { this.tz = 0; this.pzv = 0; this.onPlat = null; }
-    if (this.onPlat && (!inX(this.onPlat) || Math.abs(this.tz - platTz(this.onPlat)) > 3)) this.onPlat = null; // a pășit peste margine → cade
+    if (this.tz <= 0) { this.tz = 0; this.pzv = 0; this.onPlat = null; this._hjUsed = false; }
+    const cur2 = platOf(this.onPlat);
+    if (this.onPlat && (!cur2 || this.x < cur2.x0 || this.x > cur2.x1 || Math.abs(this.tz - cur2.tz) > 3)) this.onPlat = null; // a pășit peste margine → cade
     this.jumping = this.tz > 0.5;                              // poză de salt când e în aer
     this.state = (dir || this.tz > 0.5) ? "run" : "idle";
     this.x = clamp(this.x, 60, W - 60);
@@ -1283,6 +1293,12 @@ window.addEventListener("mouseup", (e) => {
     if (paintWin) { sendToPaint(a); lastClick = { agent: a, time: now }; } // Paint pornit → vine la Paint
     else if (lastClick.agent === a && now - lastClick.time < 350) { fightSelect(a); lastClick.agent = null; } // dublu-click
     else { a.getHit(pointer.x); lastClick = { agent: a, time: now }; }
+  } else if (pointer.moved < 8 && pointer.y < groundY - 12 && !structureAt(pointer.x, pointer.y)) {
+    // click în gol (aer) → pune un desen pe wallpaper (platformă de parkour)
+    const cx = clamp(pointer.x, 60, W - 60), cy = clamp(pointer.y, 60, groundY - 30);
+    drawings.push(makeDoodle(cx, cy, rand(30, 46), pick(CHARACTERS).color));
+    if (drawings.length > 14) drawings.shift();
+    spawnDust(cx, cy, 3);
   }
   pointer.down = false; pointer.cand = null; pointer.grabbed = null;
 });
@@ -1944,7 +1960,7 @@ function drawStopwatch() {
 }
 // ---- aplicația Setări (fundal) ----
 const BG_OPTS = [
-  { id: "daynight", label: "🌅 Zi / Noapte" }, { id: "alan", label: "🎬 Alan Becker" },
+  { id: "alan", label: "🪟 Windows 10" }, { id: "daynight", label: "🌅 Zi / Noapte" },
   { id: "black", label: "⬛ Negru" }, { id: "white", label: "⬜ Alb" },
   { id: "winxp", label: "🪟 Windows XP" }, { id: "minecraft", label: "⛏️ Minecraft" },
   { id: "space", label: "🌌 Spațiu" }, { id: "synthwave", label: "🌆 Synthwave" },
@@ -2248,7 +2264,7 @@ window.addEventListener("keydown", (e) => {
   if (k === "t") { removePlayers(); return; }
   if (k === "h") { showHitboxes = !showHitboxes; return; }
   if (k === "g") { fxLevel = fxLevel < 0.05 ? 0.1 : (fxLevel < 0.2 ? 0.35 : (fxLevel < 0.6 ? 0.7 : 0)); return; } // intensitate shader WebGL
-  if (k === " " || k === "spacebar") { if (player) player.wantJump = true; e.preventDefault(); return; }
+  if (k === " " || k === "spacebar") { if (player && !e.repeat) { if (frame - (player._lastSpace || -99) < 16) player.wantHighJump = true; else player.wantJump = true; player._lastSpace = frame; } e.preventDefault(); return; } // dublu-tap = salt înalt
   sprintHeld = e.ctrlKey || e.shiftKey; // Ctrl/Shift ținut = fugă (sprint)
   if (k === "control" || k === "shift") { e.preventDefault(); return; }
   if (k === "a" || k === "d" || k === "arrowleft" || k === "arrowright") { keys.add(k); if (k.startsWith("arrow") || e.ctrlKey) e.preventDefault(); } // preventDefault la Ctrl+A/D ca să nu declanșeze scurtături de browser
@@ -2493,8 +2509,8 @@ const SKY = [ // faze: [t, [topR,G,B], [botR,G,B]]
   [0.78, [60, 40, 88], [210, 108, 70]], // amurg
   [1.00, [12, 12, 28], [22, 20, 44]],
 ];
-let bgMode = "daynight";
-try { bgMode = localStorage.getItem("stick_bg") || "daynight"; } catch (e) {}
+let bgMode = "alan"; // default = desktopul lui Alan (Windows 10)
+try { bgMode = localStorage.getItem("stick_bg") || "alan"; } catch (e) {}
 window.setBg = (m) => { bgMode = m; try { localStorage.setItem("stick_bg", m); } catch (e) {} };
 window.getBg = () => bgMode;
 function drawWinXP() { // Windows XP „Bliss"
@@ -2505,12 +2521,21 @@ function drawWinXP() { // Windows XP „Bliss"
   ctx.fillStyle = "#5b8f2f"; ctx.beginPath(); ctx.moveTo(0, groundY); ctx.bezierCurveTo(W * 0.3, groundY - 66, W * 0.65, groundY - 16, W, groundY - 46); ctx.lineTo(W, groundY); ctx.closePath(); ctx.fill();
   ctx.fillStyle = "#7cb342"; ctx.beginPath(); ctx.moveTo(0, groundY); ctx.bezierCurveTo(W * 0.28, groundY - 34, W * 0.72, groundY - 82, W, groundY - 26); ctx.lineTo(W, groundY); ctx.closePath(); ctx.fill();
 }
-function drawAlanBg() { // desktopul din Animator vs. Animation (pânză deschisă)
-  const g = ctx.createLinearGradient(0, 0, 0, groundY); g.addColorStop(0, "#f2f5f9"); g.addColorStop(1, "#cfd8e6");
+function drawWin10() { // wallpaper-ul „Hero" din Windows 10 (desktopul din AvM recent)
+  const g = ctx.createLinearGradient(0, 0, 0, groundY); g.addColorStop(0, "#0a1830"); g.addColorStop(0.55, "#123a72"); g.addColorStop(1, "#0a1428");
   ctx.fillStyle = g; ctx.fillRect(0, 0, W, groundY);
-  ctx.strokeStyle = "rgba(90,110,150,0.10)"; ctx.lineWidth = 1; // grilaj fin de „foaie"
-  for (let x = 40; x < W; x += 40) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, groundY); ctx.stroke(); }
-  for (let y = 40; y < groundY; y += 40) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); }
+  const cx = W * 0.52, cy = groundY * 0.46, s = Math.min(W * 0.85, groundY) * 0.2;
+  const glow = ctx.createRadialGradient(cx, cy, 0, cx, cy, s * 2.8); glow.addColorStop(0, "rgba(90,170,255,0.45)"); glow.addColorStop(1, "transparent");
+  ctx.fillStyle = glow; ctx.fillRect(0, 0, W, groundY);
+  ctx.save(); ctx.translate(cx, cy); ctx.transform(1, 0.14, -0.28, 1, 0, 0); // înclinare ușoară (perspectivă)
+  const gap = s * 0.14;
+  for (const [sx, sy] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
+    const x = sx < 0 ? -s : gap, y = sy < 0 ? -s : gap, w = s - gap, h = s - gap;
+    const pg = ctx.createLinearGradient(x, y, x + w, y + h); pg.addColorStop(0, "rgba(150,215,255,0.95)"); pg.addColorStop(1, "rgba(45,120,220,0.85)");
+    ctx.fillStyle = pg; ctx.fillRect(x, y, w, h);
+  }
+  ctx.restore();
+  const vg = ctx.createRadialGradient(cx, cy, s, cx, cy, Math.max(W, groundY) * 0.75); vg.addColorStop(0, "transparent"); vg.addColorStop(1, "rgba(2,6,18,0.6)"); ctx.fillStyle = vg; ctx.fillRect(0, 0, W, groundY);
 }
 function drawWhite() { const g = ctx.createLinearGradient(0, 0, 0, groundY); g.addColorStop(0, "#fafbfc"); g.addColorStop(1, "#e7ebf1"); ctx.fillStyle = g; ctx.fillRect(0, 0, W, groundY); }
 let _stars2 = null, _stars2W = 0;
@@ -2563,7 +2588,7 @@ function drawSky() {
     case "black": ctx.fillStyle = "#0a0a12"; ctx.fillRect(0, 0, W, groundY); return;
     case "white": drawWhite(); return;
     case "winxp": drawWinXP(); return;
-    case "alan": drawAlanBg(); return;
+    case "alan": drawWin10(); return;
     case "space": drawSpace(); return;
     case "synthwave": drawSynthwave(); return;
     case "matrix": drawMatrix(); return;
