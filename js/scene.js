@@ -686,8 +686,12 @@ class Agent {
     };
     const cur = platOf(this.onPlat);
     const grounded = this.tz <= 0 || (cur && this.x >= cur.x0 && this.x <= cur.x1 && Math.abs(this.tz - cur.tz) < 3);
-    if (this.wantJump) { this.wantJump = false; if (grounded && this.jumpCd <= 0) { this.pzv = 13.5; this.jumpCd = 8; this.onPlat = null; this.squash = 1; spawnDust(this.x, groundY - this.tz, 4); } }
-    if (this.wantHighJump) { this.wantHighJump = false; if (grounded || (this.tz > 0 && !this._hjUsed)) { this.pzv = 21; this._hjUsed = true; this.jumpCd = 8; this.onPlat = null; this.squash = 1; spawnDust(this.x, groundY - this.tz, 7); this.speak(pick(["Sus! 🚀", "Hopa!", "Zbor!"]), 40); } } // dublu-space = salt înalt
+    if (grounded) this._airJumps = 1; // pe sol/desen/structură → reîncarcă saltul din aer (double jump)
+    if (this.wantJump) {
+      this.wantJump = false;
+      if (grounded && this.jumpCd <= 0) { this.pzv = 13.5; this.jumpCd = 8; this.onPlat = null; this.squash = 1; spawnDust(this.x, groundY - this.tz, 4); }
+      else if (this.tz > 0 && this._airJumps > 0) { this.pzv = 12.5; this._airJumps--; this.onPlat = null; this.squash = 1; spawnDust(this.x, groundY - this.tz, 4); this.speak(pick(["Hop! 🚀", "Din nou!", "Sus!"]), 30); } // DOUBLE JUMP în aer
+    }
     const prevTz = this.tz;
     this.pzv = (this.pzv || 0) - 0.9;                          // gravitație
     this.tz += this.pzv;
@@ -699,11 +703,11 @@ class Agent {
       for (const [pt, x0, x1, ref] of plats) { if (this.x < x0 || this.x > x1) continue; if (pt > 0 && prevTz >= pt - 2 && this.tz <= pt && pt > bestTz) { bestTz = pt; best = ref; } }
       if (best) { this.tz = bestTz; this.pzv = 0; this.onPlat = best; if (prevTz - bestTz > 6) { this.squash = 1; spawnDust(this.x, groundY - this.tz, 4); } }
     }
-    if (this.tz <= 0) { this.tz = 0; this.pzv = 0; this.onPlat = null; this._hjUsed = false; }
+    if (this.tz <= 0) { this.tz = 0; this.pzv = 0; this.onPlat = null; }
     const cur2 = platOf(this.onPlat);
     if (this.onPlat && (!cur2 || this.x < cur2.x0 || this.x > cur2.x1 || Math.abs(this.tz - cur2.tz) > 3)) this.onPlat = null; // a pășit peste margine → cade
-    this.jumping = this.tz > 0.5;                              // poză de salt când e în aer
-    this.state = (dir || this.tz > 0.5) ? "run" : "idle";
+    this.jumping = this.tz > 0.5 && !this.onPlat;             // poză de salt DOAR când e în aer (nu când stă pe desen/structură)
+    this.state = (dir || (this.tz > 0.5 && !this.onPlat)) ? "run" : "idle";
     this.x = clamp(this.x, 60, W - 60);
   }
 
@@ -2264,7 +2268,7 @@ window.addEventListener("keydown", (e) => {
   if (k === "t") { removePlayers(); return; }
   if (k === "h") { showHitboxes = !showHitboxes; return; }
   if (k === "g") { fxLevel = fxLevel < 0.05 ? 0.1 : (fxLevel < 0.2 ? 0.35 : (fxLevel < 0.6 ? 0.7 : 0)); return; } // intensitate shader WebGL
-  if (k === " " || k === "spacebar") { if (player && !e.repeat) { if (frame - (player._lastSpace || -99) < 16) player.wantHighJump = true; else player.wantJump = true; player._lastSpace = frame; } e.preventDefault(); return; } // dublu-tap = salt înalt
+  if (k === " " || k === "spacebar") { if (player && !e.repeat) player.wantJump = true; e.preventDefault(); return; } // Space = salt; a doua apăsare în aer = double jump
   sprintHeld = e.ctrlKey || e.shiftKey; // Ctrl/Shift ținut = fugă (sprint)
   if (k === "control" || k === "shift") { e.preventDefault(); return; }
   if (k === "a" || k === "d" || k === "arrowleft" || k === "arrowright") { keys.add(k); if (k.startsWith("arrow") || e.ctrlKey) e.preventDefault(); } // preventDefault la Ctrl+A/D ca să nu declanșeze scurtături de browser
