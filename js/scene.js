@@ -694,8 +694,8 @@ class Agent {
     // aterizează pe partea de sus a unui desen (coliziune ca la ferestre)
     const ld = this.landDrawing;
     if (ld && this.tzv > 0 && drawings.includes(ld)) {
-      const top = ld.cy - ld.s;
-      if (this.x >= ld.cx - ld.s && this.x <= ld.cx + ld.s && this.tz <= groundY - top) {
+      const top = ld.cy - ld.s, hw = ld.s * 1.6; // raza de aterizare = cutia de drop (dropTarget)
+      if (this.x >= ld.cx - hw && this.x <= ld.cx + hw && this.tz <= groundY - top) {
         this.landDrawing = null; this.tangle = 0; this.tangVel = 0; this.squash = 1;
         this.landOnDrawing(ld);
         return;
@@ -1220,7 +1220,7 @@ window.addEventListener("mouseup", (e) => {
     if (drop && pointer.y < groundY - 20) { // lăsat deasupra unei aplicații / clădiri / desen
       if (drop.type === "win") { const vx = pointer.x - pointer.px, vy = pointer.y - pointer.py; g.release(vx * 1.3, vy * 1.3); g.landWin = drop.win; } // cade pe fereastră
       else if (drop.type === "struct") { const vx = pointer.x - pointer.px, vy = pointer.y - pointer.py; g.release(vx * 1.3, vy * 1.3); g.landStruct = drop.s; } // cade pe clădire
-      else { const vx = pointer.x - pointer.px, vy = pointer.y - pointer.py; g.release(vx * 1.3, vy * 1.3); g.landDrawing = drop.d; } // cade și aterizează pe vârful desenului
+      else { g.release(0, 3); g.landDrawing = drop.d; } // cade DREPT pe vârful desenului (fără fling lateral/sus — desenele-s ținte mici)
     } else {
       const vx = pointer.x - pointer.px, vy = pointer.y - pointer.py;
       g.release(vx * 1.3, vy * 1.3);
