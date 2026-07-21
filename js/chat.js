@@ -492,3 +492,26 @@ ebtn.addEventListener("click", () => {
   if (!epanel.classList.contains("hidden")) { refreshToggle(); refreshExped(); expedTick = setInterval(refreshExped, 1000); requestAnimationFrame(renderScreen); }
   else if (expedTick) { clearInterval(expedTick); expedTick = null; }
 });
+
+// ================= AJUTOR: CONTROALE (❔) =================
+const hbtn = document.createElement("button");
+hbtn.textContent = "❔ Taste";
+hbtn.style.cssText = "position:fixed;top:10px;right:12px;z-index:60;background:#1e2130;color:#cdd3ff;border:1px solid #3a3f5a;border-radius:9px;padding:7px 13px;font:600 13px 'Segoe UI',sans-serif;cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,0.4);";
+document.body.appendChild(hbtn);
+const hpanel = document.createElement("div");
+hpanel.style.cssText = "position:fixed;top:50px;right:12px;z-index:60;width:298px;background:rgba(18,20,32,0.97);color:#dfe3f5;border:1px solid #3a3f5a;border-radius:12px;padding:14px 16px;font:13px 'Segoe UI',sans-serif;line-height:1.75;box-shadow:0 10px 34px rgba(0,0,0,0.55);display:none;";
+hpanel.innerHTML = `<b style="color:#8ee6a0">🎮 Controalele tale</b><br>
+<b>R</b> — creează-ți personajul („TU")<br>
+<b>A / D</b> sau <b>← →</b> — mișcare<br>
+<b>Space</b> — salt (parkour pe desene!)<br>
+<b>Ctrl / Shift</b> — sprint (fugă)<br>
+<b>T</b> — șterge-ți personajul
+<hr style="border:none;border-top:1px solid #333a55;margin:9px 0">
+<b style="color:#8ee6a0">🖱️ Cu mouse-ul</b><br>
+<b>Click</b> pe stickman — lovește (dublu = provoacă)<br>
+<b>Trage</b> un stickman — îl ridici & arunci<br>
+<b>Click</b> pe o construcție — o distrugi (trage = muți)<br>
+<b>Click dreapta</b> pe stickman — chat<br>
+<b>H</b> — arată hitbox-urile · <b>G</b> — efecte`;
+document.body.appendChild(hpanel);
+hbtn.addEventListener("click", () => { hpanel.style.display = hpanel.style.display === "none" ? "block" : "none"; hbtn.blur(); });
