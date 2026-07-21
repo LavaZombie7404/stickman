@@ -2521,21 +2521,33 @@ function drawWinXP() { // Windows XP „Bliss"
   ctx.fillStyle = "#5b8f2f"; ctx.beginPath(); ctx.moveTo(0, groundY); ctx.bezierCurveTo(W * 0.3, groundY - 66, W * 0.65, groundY - 16, W, groundY - 46); ctx.lineTo(W, groundY); ctx.closePath(); ctx.fill();
   ctx.fillStyle = "#7cb342"; ctx.beginPath(); ctx.moveTo(0, groundY); ctx.bezierCurveTo(W * 0.28, groundY - 34, W * 0.72, groundY - 82, W, groundY - 26); ctx.lineTo(W, groundY); ctx.closePath(); ctx.fill();
 }
-function drawWin10() { // wallpaper-ul „Hero" din Windows 10 (desktopul din AvM recent)
-  const g = ctx.createLinearGradient(0, 0, 0, groundY); g.addColorStop(0, "#0a1830"); g.addColorStop(0.55, "#123a72"); g.addColorStop(1, "#0a1428");
+function drawWin10() { // wallpaper-ul clasic „Hero" din Windows 10 (fereastră spre dreapta, lumină spre stânga)
+  const g = ctx.createLinearGradient(0, 0, 0, groundY); g.addColorStop(0, "#071634"); g.addColorStop(1, "#0a1b3e");
   ctx.fillStyle = g; ctx.fillRect(0, 0, W, groundY);
-  const cx = W * 0.52, cy = groundY * 0.46, s = Math.min(W * 0.85, groundY) * 0.2;
-  const glow = ctx.createRadialGradient(cx, cy, 0, cx, cy, s * 2.8); glow.addColorStop(0, "rgba(90,170,255,0.45)"); glow.addColorStop(1, "transparent");
+  const cx = W * 0.62, cy = groundY * 0.44, s = Math.min(W * 0.85, groundY) * 0.19;
+  // halou + raze de lumină care izbucnesc din fereastră spre STÂNGA (evantai)
+  const glow = ctx.createRadialGradient(cx, cy, 0, cx, cy, W * 0.75); glow.addColorStop(0, "rgba(120,190,255,0.5)"); glow.addColorStop(0.4, "rgba(60,130,230,0.16)"); glow.addColorStop(1, "transparent");
   ctx.fillStyle = glow; ctx.fillRect(0, 0, W, groundY);
-  ctx.save(); ctx.translate(cx, cy); ctx.transform(1, 0.14, -0.28, 1, 0, 0); // înclinare ușoară (perspectivă)
+  ctx.save(); ctx.globalCompositeOperation = "lighter";
+  for (let i = 0; i < 7; i++) {
+    const a = Math.PI + (-0.5 + i * 0.16); // spre stânga, în evantai
+    ctx.fillStyle = "rgba(135,198,255," + (0.05 + (i % 2) * 0.045) + ")";
+    ctx.beginPath(); ctx.moveTo(cx, cy);
+    ctx.lineTo(cx + Math.cos(a - 0.045) * W, cy + Math.sin(a - 0.045) * W);
+    ctx.lineTo(cx + Math.cos(a + 0.045) * W, cy + Math.sin(a + 0.045) * W);
+    ctx.closePath(); ctx.fill();
+  }
+  ctx.restore();
+  // fereastra Windows (4 pane înclinate)
+  ctx.save(); ctx.translate(cx, cy); ctx.transform(1, 0.13, -0.26, 1, 0, 0);
   const gap = s * 0.14;
   for (const [sx, sy] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
     const x = sx < 0 ? -s : gap, y = sy < 0 ? -s : gap, w = s - gap, h = s - gap;
-    const pg = ctx.createLinearGradient(x, y, x + w, y + h); pg.addColorStop(0, "rgba(150,215,255,0.95)"); pg.addColorStop(1, "rgba(45,120,220,0.85)");
+    const pg = ctx.createLinearGradient(x, y, x + w, y + h); pg.addColorStop(0, "rgba(175,228,255,0.98)"); pg.addColorStop(1, "rgba(55,135,235,0.9)");
     ctx.fillStyle = pg; ctx.fillRect(x, y, w, h);
   }
   ctx.restore();
-  const vg = ctx.createRadialGradient(cx, cy, s, cx, cy, Math.max(W, groundY) * 0.75); vg.addColorStop(0, "transparent"); vg.addColorStop(1, "rgba(2,6,18,0.6)"); ctx.fillStyle = vg; ctx.fillRect(0, 0, W, groundY);
+  const vg = ctx.createRadialGradient(cx, cy, s, cx, cy, Math.max(W, groundY) * 0.8); vg.addColorStop(0, "transparent"); vg.addColorStop(1, "rgba(3,8,22,0.68)"); ctx.fillStyle = vg; ctx.fillRect(0, 0, W, groundY);
 }
 function drawWhite() { const g = ctx.createLinearGradient(0, 0, 0, groundY); g.addColorStop(0, "#fafbfc"); g.addColorStop(1, "#e7ebf1"); ctx.fillStyle = g; ctx.fillRect(0, 0, W, groundY); }
 let _stars2 = null, _stars2W = 0;
