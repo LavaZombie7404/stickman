@@ -664,8 +664,14 @@ class Agent {
       let dir = 0;
       if (keys.has("a") || keys.has("arrowleft")) dir -= 1;
       if (keys.has("d") || keys.has("arrowright")) dir += 1;
-      if (dir) { this.face = dir; const step = dir * this.speed * 2.4; if (!this.wouldCollide(this.x + step)) this.x += step; this.walkPhase += 0.16; this.state = "run"; }
-      else this.state = "idle";
+      if (dir) {
+        this.face = dir;
+        const sprint = keys.has("control") ? 1.9 : 1;                 // Ctrl = fugă (sprint)
+        this.x += dir * this.speed * 2.4 * sprint;
+        this.walkPhase += 0.16 * sprint;                              // picioarele se mișcă mai repede la sprint
+        if (sprint > 1 && frame % 5 === 0) spawnDust(this.x, groundY, 2); // praf de sprint
+        this.state = "run";
+      } else this.state = "idle";
     }
     this.x = clamp(this.x, 60, W - 60);
   }
@@ -2123,7 +2129,8 @@ window.addEventListener("keydown", (e) => {
   if (k === "h") { showHitboxes = !showHitboxes; return; }
   if (k === "g") { fxLevel = fxLevel < 0.05 ? 0.1 : (fxLevel < 0.2 ? 0.35 : (fxLevel < 0.6 ? 0.7 : 0)); return; } // intensitate shader WebGL
   if (k === " " || k === "spacebar") { if (player && !player.jumping && player.jumpCd <= 0) { player.jumping = true; player.jumpT = 0; } e.preventDefault(); return; }
-  if (k === "a" || k === "d" || k === "arrowleft" || k === "arrowright") { keys.add(k); if (k.startsWith("arrow")) e.preventDefault(); }
+  if (k === "control") { keys.add("control"); return; } // Ctrl = fugă (sprint)
+  if (k === "a" || k === "d" || k === "arrowleft" || k === "arrowright") { keys.add(k); if (k.startsWith("arrow") || e.ctrlKey) e.preventDefault(); } // preventDefault la Ctrl+A/D ca să nu declanșeze scurtături de browser
 });
 window.addEventListener("keyup", (e) => { keys.delete(e.key.toLowerCase()); });
 function drawHitboxes() {
