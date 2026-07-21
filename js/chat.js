@@ -386,29 +386,60 @@ ego.addEventListener("click", () => {
 let goFlash = 0;
 function flashGo(txt) { ego.textContent = txt; goFlash = 90; }
 
-function bgFor(place) {
-  if (/peșter|pester/i.test(place)) return "#161a2a";
-  if (/p[aă]dur/i.test(place)) return "#12281a";
-  if (/munte/i.test(place)) return "#20242e";
-  if (/insul/i.test(place)) return "#122a2e";
-  if (/de[sș]ert/i.test(place)) return "#2a2416";
-  if (/castel|nor/i.test(place)) return "#22203a";
-  return "#141830";
+// ---- temă vizuală per loc (cer + sol + decor de fundal) ----
+function placeTheme(place) {
+  const p = (place || "").toLowerCase();
+  if (p.includes("munte")) return { sky: ["#2a3350", "#5a6690"], ground: "#39425f", scenery: scMountains };
+  if (p.includes("redstone")) return { sky: ["#140f16", "#2a1820"], ground: "#1c1620", scenery: scCave };
+  if (p.includes("dure")) return { sky: ["#12241a", "#20402a"], ground: "#152a1b", scenery: scForest };
+  if (p.includes("insul")) return { sky: ["#1a3a5a", "#3a86a8"], ground: "#cdb46e", scenery: scIsland };
+  if (p.includes("animator")) return { sky: ["#0e0e1e", "#20203a"], ground: "#26264a", scenery: scAnimator };
+  if (p.includes("nisip")) return { sky: ["#7a5a2a", "#d8b25a"], ground: "#cfa752", scenery: scDesert };
+  if (p.includes("castel") || p.includes("nori")) return { sky: ["#3a3a6a", "#8a8ad0"], ground: "#6a6aa0", scenery: scCastle };
+  return { sky: ["#141830", "#2a2e50"], ground: "#20243e", scenery: () => {} };
 }
-function emojiFor(act) {
-  if (/comor/i.test(act)) return "💰"; if (/dragon/i.test(act)) return "🐉";
-  if (/peșter|pester/i.test(act)) return "🦇"; if (/baz[aă]|construi/i.test(act)) return "🏗️";
-  if (/cub/i.test(act)) return "🧊"; if (/diamant/i.test(act)) return "💎";
-  return "⭐";
+function scMountains(g, W, gy, t) { g.fillStyle = "#2b3350"; for (const [x, h] of [[60, 70], [150, 95], [250, 75]]) { g.beginPath(); g.moveTo(x - h * 0.8, gy); g.lineTo(x, gy - h); g.lineTo(x + h * 0.8, gy); g.fill(); g.fillStyle = "#e8ecff"; g.beginPath(); g.moveTo(x - 12, gy - h + 16); g.lineTo(x, gy - h); g.lineTo(x + 12, gy - h + 16); g.fill(); g.fillStyle = "#2b3350"; } }
+function scCave(g, W, gy, t) { g.fillStyle = "#0d0a10"; for (let i = 0; i < 8; i++) { const x = 20 + i * 38; g.beginPath(); g.moveTo(x - 7, 0); g.lineTo(x + 7, 0); g.lineTo(x, 14 + (i % 3) * 8); g.fill(); } g.fillStyle = "#e0402c"; for (let i = 0; i < 5; i++) { const x = 40 + i * 55, y = gy - 22 - (i % 2) * 10; g.globalAlpha = 0.5 + 0.3 * Math.sin(t * 3 + i); g.beginPath(); g.arc(x, y, 2.4, 0, Math.PI * 2); g.fill(); } g.globalAlpha = 1; }
+function scForest(g, W, gy, t) { for (let i = 0; i < 6; i++) { const x = 24 + i * 50, h = 46 + (i % 3) * 14; g.fillStyle = "#3a2a18"; g.fillRect(x - 3, gy - h * 0.4, 6, h * 0.4); g.fillStyle = i % 2 ? "#1f4a28" : "#2a5a32"; g.beginPath(); g.moveTo(x - 16, gy - h * 0.35); g.lineTo(x, gy - h); g.lineTo(x + 16, gy - h * 0.35); g.fill(); } }
+function scIsland(g, W, gy, t) { g.fillStyle = "#2a7a9a"; g.fillRect(0, gy + 8, W, 20); g.strokeStyle = "rgba(255,255,255,0.4)"; g.lineWidth = 1.5; g.beginPath(); for (let x = 0; x <= W; x += 6) g.lineTo(x, gy + 10 + Math.sin(x * 0.2 + t * 2) * 2); g.stroke(); g.fillStyle = "#6a4a2a"; g.fillRect(W - 60, gy - 30, 5, 30); g.fillStyle = "#2fa84a"; for (const a of [-0.6, -0.2, 0.2, 0.6]) { g.beginPath(); g.moveTo(W - 57, gy - 30); g.quadraticCurveTo(W - 57 + Math.cos(a) * 30, gy - 44, W - 57 + Math.cos(a) * 44, gy - 34); g.quadraticCurveTo(W - 57 + Math.cos(a) * 26, gy - 34, W - 57, gy - 28); g.fill(); } }
+function scAnimator(g, W, gy, t) { g.strokeStyle = "rgba(120,140,255,0.18)"; g.lineWidth = 1; for (let x = 0; x <= W; x += 24) { g.beginPath(); g.moveTo(x, 0); g.lineTo(x, gy); g.stroke(); } for (let y = 0; y <= gy; y += 24) { g.beginPath(); g.moveTo(0, y); g.lineTo(W, y); g.stroke(); } }
+function scDesert(g, W, gy, t) { g.fillStyle = "#ffe08a"; g.beginPath(); g.arc(46, 32, 15, 0, Math.PI * 2); g.fill(); g.fillStyle = "#b8863e"; for (const [x, r] of [[80, 40], [200, 55], [300, 45]]) { g.beginPath(); g.moveTo(x - r, gy); g.quadraticCurveTo(x, gy - r * 0.5, x + r, gy); g.fill(); } }
+function scCastle(g, W, gy, t) { g.fillStyle = "rgba(255,255,255,0.7)"; for (const [x, y, r] of [[50, 30, 14], [120, 22, 18], [240, 34, 15]]) { g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.arc(x + r, y + 3, r * 0.8, 0, Math.PI * 2); g.arc(x - r, y + 3, r * 0.7, 0, Math.PI * 2); g.fill(); } g.fillStyle = "#8a8ad8"; const bx = W - 78; g.fillRect(bx, gy - 40, 46, 40); for (let i = 0; i < 4; i++) g.fillRect(bx + i * 12, gy - 46, 8, 8); g.fillStyle = "#3a3a6a"; g.fillRect(bx + 18, gy - 20, 10, 20); }
+// ---- prop-uri activitate ----
+function drawDragon(g, x, y, t) { const f = Math.sin(t * 4) * 6; g.fillStyle = "#7a3a8a"; g.beginPath(); g.ellipse(x, y, 22, 13, 0, 0, Math.PI * 2); g.fill(); g.beginPath(); g.moveTo(x - 20, y); g.quadraticCurveTo(x - 40, y - 6, x - 46, y + 8); g.lineWidth = 5; g.strokeStyle = "#7a3a8a"; g.stroke(); g.fillStyle = "#933fa8"; g.beginPath(); g.moveTo(x, y - 4); g.lineTo(x - 8, y - 22 - f); g.lineTo(x + 14, y - 8); g.fill(); g.beginPath(); g.moveTo(x + 6, y - 4); g.lineTo(x + 16, y - 20 - f); g.lineTo(x + 24, y - 6); g.fill(); g.fillStyle = "#7a3a8a"; g.beginPath(); g.arc(x + 20, y - 6, 8, 0, Math.PI * 2); g.fill(); g.fillStyle = "#ffcf3f"; g.beginPath(); g.arc(x + 23, y - 8, 1.6, 0, Math.PI * 2); g.fill(); g.fillStyle = "#ff7a2e"; g.globalAlpha = 0.7 + 0.3 * Math.sin(t * 8); g.beginPath(); g.moveTo(x + 27, y - 6); g.lineTo(x + 44, y - 9); g.lineTo(x + 27, y - 2); g.fill(); g.globalAlpha = 1; }
+function drawChest(g, x, gy, t) { const y = gy - 20; g.fillStyle = "#6a4a24"; g.fillRect(x - 16, y, 32, 20); g.fillStyle = "#8a6432"; g.fillRect(x - 16, y - 10, 32, 12); g.fillStyle = "#ffd23f"; g.fillRect(x - 3, y - 12, 6, 24); g.globalAlpha = 0.6 + 0.4 * Math.sin(t * 4); g.fillStyle = "#fff6c0"; g.beginPath(); g.arc(x + 10, y - 16, 2, 0, Math.PI * 2); g.fill(); g.globalAlpha = 1; }
+function drawDiamonds(g, W, gy, t) { for (let i = 0; i < 4; i++) { const x = W * 0.5 + i * 26, s = 6, y = gy - 8; g.fillStyle = "#4fd6e6"; g.globalAlpha = 0.8 + 0.2 * Math.sin(t * 4 + i); g.beginPath(); g.moveTo(x, y - s); g.lineTo(x + s * 0.7, y); g.lineTo(x, y + s); g.lineTo(x - s * 0.7, y); g.fill(); } g.globalAlpha = 1; }
+function drawBase(g, x, gy, t) { const cols = ["#c0764a", "#7a9a4a", "#5a7ab0"]; for (let r = 0; r < 3; r++) for (let c = 0; c < 3 - r; c++) { g.fillStyle = cols[(r + c) % 3]; g.fillRect(x - 24 + c * 14 + r * 7, gy - 12 - r * 12, 12, 12); g.strokeStyle = "rgba(0,0,0,0.3)"; g.strokeRect(x - 24 + c * 14 + r * 7, gy - 12 - r * 12, 12, 12); } }
+function drawCube(g, x, y, t) { const f = Math.sin(t * 2) * 4; y -= f; g.save(); g.globalAlpha = 0.9; g.fillStyle = "#7ee6ff"; g.fillRect(x - 10, y - 10, 20, 20); g.fillStyle = "#4fb8d6"; g.beginPath(); g.moveTo(x + 10, y - 10); g.lineTo(x + 16, y - 16); g.lineTo(x + 16, y + 4); g.lineTo(x + 10, y + 10); g.fill(); g.fillStyle = "#a6f0ff"; g.beginPath(); g.moveTo(x - 10, y - 10); g.lineTo(x - 4, y - 16); g.lineTo(x + 16, y - 16); g.lineTo(x + 10, y - 10); g.fill(); g.restore(); }
+function drawTorch(g, x, gy, t) { g.strokeStyle = "#6a4a2a"; g.lineWidth = 3; g.beginPath(); g.moveTo(x, gy); g.lineTo(x, gy - 14); g.stroke(); g.fillStyle = "#ff9a2e"; g.globalAlpha = 0.85; const f = Math.sin(t * 9) * 2; g.beginPath(); g.moveTo(x - 4, gy - 14); g.quadraticCurveTo(x, gy - 26 - f, x + 4, gy - 14); g.fill(); g.fillStyle = "#ffe14d"; g.beginPath(); g.moveTo(x - 2, gy - 14); g.quadraticCurveTo(x, gy - 21 - f, x + 2, gy - 14); g.fill(); g.globalAlpha = 1; }
+function drawActivity(g, W, gy, activity, members, t) {
+  const a = (activity || "").toLowerCase(), cx = W * 0.62;
+  let action = "walk";
+  if (a.includes("dragon")) { drawDragon(g, cx + 30, gy - 20, t); action = "swing"; }
+  else if (a.includes("comor")) { drawChest(g, cx + 40, gy, t); action = "dig"; }
+  else if (a.includes("diamant")) { drawDiamonds(g, W, gy, t); action = "reach"; }
+  else if (a.includes("construi") || a.includes("baz")) { drawBase(g, cx + 34, gy, t); action = "swing"; }
+  else if (a.includes("cub")) { drawCube(g, cx + 40, gy - 20, t); action = "reach"; }
+  else if (a.includes("explor")) { action = "walk"; } // peșteră → torța o ține un membru (mai jos)
+  const exploring = a.includes("explor");
+  members.forEach((m, i) => {
+    const x = W * 0.15 + i * 26 + Math.sin(t * 1.4 + i) * 3;
+    const face = x <= cx ? 1 : -1;
+    drawMini(g, x, gy, m.color, t * 5 + i * 1.6, m.hollowHead, m.crown, action, face);
+    if (exploring && i === 0) drawTorch(g, x + 9, gy, t);
+  });
 }
-function drawMini(g, x, gy, color, phase, hollow, crown) {
-  g.save(); g.translate(x, gy); g.strokeStyle = color; g.fillStyle = color; g.lineWidth = 2.5; g.lineCap = "round"; g.lineJoin = "round";
+function drawMini(g, x, gy, color, phase, hollow, crown, action, face) {
+  g.save(); g.translate(x, gy); g.scale(face || 1, 1); g.strokeStyle = color; g.fillStyle = color; g.lineWidth = 2.5; g.lineCap = "round"; g.lineJoin = "round";
   const hipY = -18, shY = -30, r = 5, hy = shY - 4 - r, sw = Math.sin(phase) * 4;
   g.beginPath(); g.moveTo(0, hipY); g.lineTo(-4 + sw, 0); g.stroke();
   g.beginPath(); g.moveTo(0, hipY); g.lineTo(4 - sw, 0); g.stroke();
   g.beginPath(); g.moveTo(0, hipY); g.lineTo(0, shY); g.stroke();
-  g.beginPath(); g.moveTo(0, shY + 2); g.lineTo(-5 - sw, shY + 9); g.stroke();
-  g.beginPath(); g.moveTo(0, shY + 2); g.lineTo(5 + sw, shY + 9); g.stroke();
+  const arm = (ex, ey) => { g.beginPath(); g.moveTo(0, shY + 2); g.lineTo(ex, ey); g.stroke(); };
+  if (action === "swing") { const a = Math.sin(phase * 3) * 7; arm(9, shY - 5 + a); arm(-5, shY + 9); }       // lovește (sabie/pumn)
+  else if (action === "dig") { const a = Math.abs(Math.sin(phase * 3)) * 7; arm(8, shY + 9 - a); arm(-7, shY + 9 - a); } // sapă
+  else if (action === "reach") { arm(7, shY - 9); arm(-6, shY + 8); }                                          // se întinde/culege
+  else { arm(-5 - sw, shY + 9); arm(5 + sw, shY + 9); }                                                        // merge
   g.beginPath(); g.arc(0, hy, r, 0, Math.PI * 2); if (hollow) g.stroke(); else g.fill();
   if (crown) { g.fillStyle = "#ffd23f"; g.beginPath(); g.moveTo(-6, hy - r); g.lineTo(-6, hy - r - 3); g.lineTo(-3, hy - r - 1); g.lineTo(0, hy - r - 4); g.lineTo(3, hy - r - 1); g.lineTo(6, hy - r - 3); g.lineTo(6, hy - r); g.closePath(); g.fill(); }
   g.restore();
@@ -422,16 +453,19 @@ function renderScreen() {
     g.fillStyle = "#667"; g.font = "13px 'Segoe UI', sans-serif"; g.textAlign = "center";
     g.fillText("— nimeni în expediție —", W / 2, H / 2);
   } else {
-    g.fillStyle = bgFor(info.place); g.fillRect(0, 0, W, H);
-    g.strokeStyle = "rgba(255,255,255,0.18)"; g.lineWidth = 2; g.beginPath(); g.moveTo(0, gy); g.lineTo(W, gy); g.stroke();
-    g.font = "30px serif"; g.textAlign = "center"; g.fillText(emojiFor(info.activity), W - 30, 40);
-    g.fillStyle = "rgba(255,255,255,0.5)"; g.font = "11px 'Segoe UI', sans-serif"; g.textAlign = "left"; g.fillText(info.place, 8, 16);
-    const t = performance.now() / 1000, mem = info.members || [];
-    mem.forEach((m, i) => {
-      const span = (W - 70) / Math.max(1, mem.length);
-      const x = 30 + i * span + Math.sin(t * 1.1 + i) * (span * 0.35);
-      drawMini(g, x, gy, m.color, t * 4 + i * 1.7, m.hollowHead, m.crown);
-    });
+    const t = performance.now() / 1000, theme = placeTheme(info.place);
+    const grd = g.createLinearGradient(0, 0, 0, gy); grd.addColorStop(0, theme.sky[0]); grd.addColorStop(1, theme.sky[1]);
+    g.fillStyle = grd; g.fillRect(0, 0, W, gy);
+    theme.scenery(g, W, gy, t);                                  // decor de fundal (munți/copaci/dune/...)
+    g.fillStyle = theme.ground; g.fillRect(0, gy, W, H - gy);    // sol
+    g.strokeStyle = "rgba(255,255,255,0.18)"; g.lineWidth = 1.5; g.beginPath(); g.moveTo(0, gy); g.lineTo(W, gy); g.stroke();
+    drawActivity(g, W, gy, info.activity, info.members || [], t); // prop + membrii care fac exact activitatea
+    // etichete: locul + activitatea (fix ce zic)
+    g.textAlign = "left"; g.font = "bold 11px 'Segoe UI',sans-serif";
+    g.fillStyle = "rgba(0,0,0,0.45)"; g.fillRect(4, 4, g.measureText(info.place).width + 10, 16);
+    g.fillStyle = "#fff"; g.fillText(info.place, 9, 16);
+    g.font = "10px 'Segoe UI',sans-serif"; g.fillStyle = "rgba(255,255,255,0.85)";
+    g.fillText("⚔️ " + info.activity, 9, H - 5);
   }
   if (goFlash > 0 && --goFlash === 0) ego.textContent = "🚀 Trimite în expediție";
   requestAnimationFrame(renderScreen);
