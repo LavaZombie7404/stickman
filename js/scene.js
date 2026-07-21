@@ -1943,9 +1943,16 @@ function drawStopwatch() {
   ctx.restore();
 }
 // ---- aplicația Setări (fundal) ----
-function openSettings() { const w = 330, h = 254, y = 110; settingsWin = { x: Math.round(W / 2 - w / 2), y, w, h }; }
+const BG_OPTS = [
+  { id: "daynight", label: "🌅 Zi / Noapte" }, { id: "alan", label: "🎬 Alan Becker" },
+  { id: "black", label: "⬛ Negru" }, { id: "white", label: "⬜ Alb" },
+  { id: "winxp", label: "🪟 Windows XP" }, { id: "minecraft", label: "⛏️ Minecraft" },
+  { id: "space", label: "🌌 Spațiu" }, { id: "synthwave", label: "🌆 Synthwave" },
+  { id: "matrix", label: "🟢 Matrix" }, { id: "sunset", label: "🌇 Apus" },
+];
+const SET_GH = 44, SET_GAP = 8, SET_TOP = 58;
+function openSettings() { const w = 340, rows = Math.ceil(BG_OPTS.length / 2), h = SET_TOP + rows * (SET_GH + SET_GAP) + 8, y = Math.max(40, Math.round((groundY - h) / 2)); settingsWin = { x: Math.round(W / 2 - w / 2), y, w, h }; }
 function closeSettings() { settingsWin = null; }
-const BG_OPTS = [{ id: "daynight", label: "🌅 Zi / Noapte" }, { id: "alan", label: "🎬 Alan Becker" }, { id: "black", label: "⬛ Negru" }, { id: "winxp", label: "🪟 Windows XP" }];
 function drawSettings() {
   if (!settingsWin) return;
   const s = settingsWin;
@@ -1960,16 +1967,16 @@ function drawSettings() {
   ctx.fillStyle = hov ? "#e81123" : "#4a4b50"; rr(xb.x, xb.y, xb.s, xb.s, 5); ctx.fill();
   ctx.strokeStyle = "#fff"; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(xb.x + 5, xb.y + 5); ctx.lineTo(xb.x + xb.s - 5, xb.y + xb.s - 5); ctx.moveTo(xb.x + xb.s - 5, xb.y + 5); ctx.lineTo(xb.x + 5, xb.y + xb.s - 5); ctx.stroke();
   ctx.fillStyle = "#9aa3c0"; ctx.font = "11px 'Segoe UI', sans-serif"; ctx.fillText("FUNDAL", s.x + 15, s.y + 50);
-  const gx = s.x + 15, gy = s.y + 60, gap = 10, gw = (s.w - 30 - gap) / 2, gh = 60;
+  const gx = s.x + 15, gy = s.y + SET_TOP, gw = (s.w - 30 - SET_GAP) / 2;
   s._opts = [];
   BG_OPTS.forEach((o, i) => {
-    const bx = gx + (i % 2) * (gw + gap), by = gy + Math.floor(i / 2) * (gh + gap), sel = getBg() === o.id;
-    const oh = pointer.x >= bx && pointer.x <= bx + gw && pointer.y >= by && pointer.y <= by + gh;
-    ctx.fillStyle = sel ? "#274a70" : (oh ? "#32343c" : "#2a2c32"); rr(bx, by, gw, gh, 9); ctx.fill();
-    if (sel) { ctx.strokeStyle = "#5aa0e0"; ctx.lineWidth = 2; rr(bx, by, gw, gh, 9); ctx.stroke(); }
-    ctx.fillStyle = "#e8ecff"; ctx.font = "13px 'Segoe UI', sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText(o.label, bx + gw / 2, by + gh / 2);
+    const bx = gx + (i % 2) * (gw + SET_GAP), by = gy + Math.floor(i / 2) * (SET_GH + SET_GAP), sel = getBg() === o.id;
+    const oh = pointer.x >= bx && pointer.x <= bx + gw && pointer.y >= by && pointer.y <= by + SET_GH;
+    ctx.fillStyle = sel ? "#274a70" : (oh ? "#32343c" : "#2a2c32"); rr(bx, by, gw, SET_GH, 9); ctx.fill();
+    if (sel) { ctx.strokeStyle = "#5aa0e0"; ctx.lineWidth = 2; rr(bx, by, gw, SET_GH, 9); ctx.stroke(); }
+    ctx.fillStyle = "#e8ecff"; ctx.font = "13px 'Segoe UI', sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText(o.label, bx + gw / 2, by + SET_GH / 2);
     ctx.textBaseline = "alphabetic";
-    s._opts.push({ id: o.id, x: bx, y: by, w: gw, h: gh });
+    s._opts.push({ id: o.id, x: bx, y: by, w: gw, h: SET_GH });
   });
   ctx.restore();
 }
@@ -2505,10 +2512,64 @@ function drawAlanBg() { // desktopul din Animator vs. Animation (pânză deschis
   for (let x = 40; x < W; x += 40) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, groundY); ctx.stroke(); }
   for (let y = 40; y < groundY; y += 40) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); }
 }
+function drawWhite() { const g = ctx.createLinearGradient(0, 0, 0, groundY); g.addColorStop(0, "#fafbfc"); g.addColorStop(1, "#e7ebf1"); ctx.fillStyle = g; ctx.fillRect(0, 0, W, groundY); }
+let _stars2 = null, _stars2W = 0;
+function drawSpace() {
+  ctx.fillStyle = "#05060f"; ctx.fillRect(0, 0, W, groundY);
+  for (const [x, y, r, c] of [[W * 0.25, groundY * 0.35, 190, "rgba(96,44,150,0.25)"], [W * 0.7, groundY * 0.5, 230, "rgba(40,84,166,0.22)"]]) { const g = ctx.createRadialGradient(x, y, 0, x, y, r); g.addColorStop(0, c); g.addColorStop(1, "transparent"); ctx.fillStyle = g; ctx.fillRect(0, 0, W, groundY); }
+  if (!_stars2 || _stars2W !== W) { _stars2W = W; _stars2 = []; for (let i = 0; i < 95; i++) _stars2.push({ x: Math.random() * W, y: Math.random() * groundY, r: 0.5 + Math.random(), p: Math.random() * 6 }); }
+  ctx.fillStyle = "#fff"; for (const s of _stars2) { ctx.globalAlpha = 0.4 + 0.6 * Math.abs(Math.sin(frame * 0.03 + s.p)); ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2); ctx.fill(); } ctx.globalAlpha = 1;
+  const px = W * 0.8, py = groundY * 0.26; ctx.fillStyle = "#c98a5a"; ctx.beginPath(); ctx.arc(px, py, 32, 0, Math.PI * 2); ctx.fill();
+  ctx.save(); ctx.translate(px, py); ctx.rotate(-0.4); ctx.scale(1, 0.32); ctx.strokeStyle = "rgba(220,200,160,0.6)"; ctx.lineWidth = 4; ctx.beginPath(); ctx.arc(0, 0, 50, 0, Math.PI * 2); ctx.stroke(); ctx.restore();
+}
+function drawSynthwave() {
+  const g = ctx.createLinearGradient(0, 0, 0, groundY); g.addColorStop(0, "#160a2e"); g.addColorStop(0.6, "#3a1a5a"); g.addColorStop(1, "#ff2e78");
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, groundY);
+  const sx = W / 2, sy = groundY * 0.5, sr = 66;
+  ctx.save(); ctx.beginPath(); ctx.arc(sx, sy, sr, 0, Math.PI * 2); ctx.clip();
+  const sg = ctx.createLinearGradient(0, sy - sr, 0, sy + sr); sg.addColorStop(0, "#ffd24d"); sg.addColorStop(1, "#ff2e78"); ctx.fillStyle = sg; ctx.fillRect(sx - sr, sy - sr, sr * 2, sr * 2);
+  ctx.fillStyle = "#160a2e"; for (let i = 0; i < 6; i++) ctx.fillRect(sx - sr, sy + 6 + i * 9, sr * 2, 4 - i * 0.5);
+  ctx.restore();
+  const hz = groundY * 0.62; ctx.strokeStyle = "rgba(255,70,180,0.55)"; ctx.lineWidth = 1.4;
+  for (let i = 0; i <= 12; i++) { const x = W * i / 12; ctx.beginPath(); ctx.moveTo(W / 2 + (x - W / 2) * 0.28, hz); ctx.lineTo(x, groundY); ctx.stroke(); }
+  for (let j = 1; j <= 6; j++) { const y = hz + (groundY - hz) * (j * j / 36); ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); }
+}
+let _matrix = null;
+const MTX_CH = "ABCDEFGHKLMNPRSTUVXYZ0123456789#$%*+=";
+function drawMatrix() {
+  ctx.fillStyle = "#020602"; ctx.fillRect(0, 0, W, groundY);
+  const cols = Math.max(1, Math.floor(W / 14));
+  if (!_matrix || _matrix.length !== cols) { _matrix = []; for (let i = 0; i < cols; i++) _matrix.push({ y: Math.random() * groundY, sp: 1 + Math.random() * 2.5, len: 7 + Math.floor(Math.random() * 10) }); }
+  ctx.font = "13px monospace"; ctx.textAlign = "center";
+  for (let i = 0; i < cols; i++) { const m = _matrix[i], x = i * 14 + 7; m.y += m.sp; if (m.y - m.len * 14 > groundY) { m.y = -Math.random() * 60; m.sp = 1 + Math.random() * 2.5; }
+    for (let k = 0; k < m.len; k++) { const yy = m.y - k * 14; if (yy < 0 || yy > groundY) continue; ctx.fillStyle = k === 0 ? "#d6ffd8" : `rgba(40,220,90,${1 - k / m.len})`; ctx.fillText(MTX_CH.charAt((i * 7 + k + Math.floor(m.y / 14)) % MTX_CH.length), x, yy); } }
+  ctx.textAlign = "left";
+}
+function drawMinecraftBg() {
+  ctx.fillStyle = "#79b7ff"; ctx.fillRect(0, 0, W, groundY);
+  ctx.fillStyle = "#fff6a0"; ctx.fillRect(W * 0.12 - 18, groundY * 0.2 - 18, 36, 36);
+  ctx.fillStyle = "rgba(255,255,255,0.92)";
+  const cloud = (cx, cy) => { for (const [dx, dy] of [[0, 0], [1, 0], [2, 0], [3, 0], [1, -1], [2, -1]]) ctx.fillRect(cx + dx * 14, cy + dy * 14, 14, 14); };
+  cloud(W * 0.5, groundY * 0.2); cloud(W * 0.76, groundY * 0.34);
+  ctx.fillStyle = "#5aab3a"; ctx.fillRect(0, groundY - 16, W, 16); ctx.fillStyle = "#7a5a3a"; ctx.fillRect(0, groundY - 4, W, 4);
+}
+function drawSunset() {
+  const g = ctx.createLinearGradient(0, 0, 0, groundY); g.addColorStop(0, "#2a1a4a"); g.addColorStop(0.5, "#c74a5a"); g.addColorStop(1, "#ffb24d");
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, groundY);
+  const sx = W / 2, sy = groundY * 0.72; ctx.fillStyle = "rgba(255,200,90,0.3)"; ctx.beginPath(); ctx.arc(sx, sy, 92, 0, Math.PI * 2); ctx.fill(); ctx.fillStyle = "#ffd67a"; ctx.beginPath(); ctx.arc(sx, sy, 48, 0, Math.PI * 2); ctx.fill();
+}
 function drawSky() {
-  if (bgMode === "black") { ctx.fillStyle = "#0a0a12"; ctx.fillRect(0, 0, W, groundY); return; }
-  if (bgMode === "winxp") { drawWinXP(); return; }
-  if (bgMode === "alan") { drawAlanBg(); return; }
+  switch (bgMode) {
+    case "black": ctx.fillStyle = "#0a0a12"; ctx.fillRect(0, 0, W, groundY); return;
+    case "white": drawWhite(); return;
+    case "winxp": drawWinXP(); return;
+    case "alan": drawAlanBg(); return;
+    case "space": drawSpace(); return;
+    case "synthwave": drawSynthwave(); return;
+    case "matrix": drawMatrix(); return;
+    case "minecraft": drawMinecraftBg(); return;
+    case "sunset": drawSunset(); return;
+  }
   const t = (dayClock % DAY_LEN) / DAY_LEN;
   let a = SKY[0], b = SKY[1];
   for (let i = 0; i < SKY.length - 1; i++) if (t >= SKY[i][0] && t <= SKY[i + 1][0]) { a = SKY[i]; b = SKY[i + 1]; break; }
