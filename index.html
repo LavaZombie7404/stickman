@@ -11,5 +11,29 @@
   <script src="js/characters.js"></script>
   <script src="js/scene.js"></script>
   <script src="js/chat.js"></script>
+  <script>
+  // Auto-reload: reincarca pagina singur cand codul s-a schimbat pe server (fara refresh manual).
+  (function () {
+    if (location.protocol === "file:") return; // fetch e blocat pe file:// — merge doar pe http(s)/Pages
+    var files = ["js/scene.js", "js/characters.js", "js/chat.js", "css/style.css", "index.html"];
+    var sig = null;
+    function stamp() {
+      return Promise.all(files.map(function (f) {
+        return fetch(f + "?t=" + Date.now(), { method: "HEAD", cache: "no-store" })
+          .then(function (r) { return r.headers.get("etag") || r.headers.get("last-modified") || ""; })
+          .catch(function () { return ""; });
+      })).then(function (tags) { return tags.join("|"); });
+    }
+    function check() {
+      stamp().then(function (s) {
+        if (!s.replace(/\|/g, "")) return;   // nu am putut citi nimic → nu face nimic
+        if (sig === null) sig = s;
+        else if (s !== sig) location.reload(); // s-a schimbat ceva → reincarca
+      });
+    }
+    setInterval(check, 4000);
+    check();
+  })();
+  </script>
 </body>
 </html>
