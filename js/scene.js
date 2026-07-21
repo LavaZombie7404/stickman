@@ -513,6 +513,7 @@ class Agent {
           const step = Math.sign(dx) * this.speed * 2.6;
           this.face = dx >= 0 ? 1 : -1;
           if (!this.wouldCollide(this.x + step)) { this.x += step; this.walkPhase += 0.22; }
+          else { this.targetX = clamp(this.x - Math.sign(dx) * rand(140, 280), 80, W - 80); } // blocat → schimbă ținta (se întoarce), nu rămâne blocat
         }
       }
     }
@@ -621,6 +622,7 @@ class Agent {
           const step = Math.sign(dx) * this.speed;
           this.face = dx >= 0 ? 1 : -1;
           if (!this.wouldCollide(this.x + step)) { this.x += step; this.walkPhase += 0.115; }
+          else { this.targetX = clamp(this.x - Math.sign(dx) * rand(140, 280), 80, W - 80); this.stateTimer = rand(120, 300); } // blocat de altcineva → se întoarce spre altă țintă, nu rămâne înțepenit
         }
       }
     }
