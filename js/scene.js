@@ -607,8 +607,15 @@ class Agent {
             this.state = "draw"; this.doodleReveal = 0; this.drawTimer = Math.max(70, this.doodle.totalPts * 2);
             this.speak(pick(["Desenez! 🎨", "Artă!", "O capodoperă!", "Uite ce fac!"]), 110);
           } else if (r < 0.22) { this.state = "run"; this.targetX = rand(80, W - 80); this.stateTimer = rand(120, 260); this.speak(pick(["Aici!", "Repede!", "Hop!"]), 60); }
-          else if (r < 0.45) { this.state = "idle"; this.targetX = null; this.stateTimer = rand(60, 140); }
-          else { this.state = "walk"; this.targetX = rand(80, W - 80); this.stateTimer = rand(120, 300); }
+          else if (r < 0.45) { this.state = "idle"; this.targetX = null; this.stateTimer = rand(60, 140); if (Math.random() < 0.4) this.face *= -1; } // se întoarce să privească în jur
+          else { // mers cu sens: spre alt stickman (socializare), plimbare scurtă prin apropiere, sau traversare
+            this.state = "walk";
+            const others = agents.filter(o => o !== this && !o.away && !o.isPlayer && (o.state === "walk" || o.state === "idle"));
+            const rr = Math.random();
+            if (others.length && rr < 0.4) { const o = pick(others); this.targetX = clamp(o.x + rand(-55, 55), 80, W - 80); this.stateTimer = rand(150, 300); if (Math.random() < 0.3) this.speak(pick(["Hei!", "Stai să vin!", "Ce faceți?", "Și eu!"]), 70); }
+            else if (rr < 0.75) { this.targetX = clamp(this.x + rand(-230, 230), 80, W - 80); this.stateTimer = rand(120, 240); }
+            else { this.targetX = rand(80, W - 80); this.stateTimer = rand(160, 320); }
+          }
         }
       }
       if (this.state === "walk" && this.targetX !== null && !this.jumping && this.startle <= 0) {

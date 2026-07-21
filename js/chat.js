@@ -33,7 +33,13 @@ const elForm = panel.querySelector(".chat-form");
 const elInput = elForm.querySelector("input");
 const elBanner = panel.querySelector(".chat-banner");
 
-function refreshBanner() { elBanner.classList.add("hidden"); }
+function aiStatusText() {
+  if (hasKey()) return null; // Claude activ → fără banner
+  if (typeof chromeAI !== "undefined" && chromeAI.status === "ready") return "🤖 AI local Chrome (Gemini Nano) activ";
+  if (typeof chromeAI !== "undefined" && chromeAI.status === "downloading") return "⏳ AI Chrome se descarcă… momentan mod scriptat";
+  return null; // scriptat → fără banner
+}
+function refreshBanner() { const t = aiStatusText(); if (t) { elBanner.textContent = t; elBanner.classList.remove("hidden"); } else elBanner.classList.add("hidden"); }
 
 function addMsg(who, text) {
   const el = document.createElement("div");
@@ -120,7 +126,7 @@ elForm.addEventListener("submit", async (e) => {
 
   let reply;
   try {
-    reply = hasKey() ? await claudeReply(c, histories[c.id]) : scriptedReply(c, msg);
+    reply = await aiReply(c, histories[c.id], msg);
   } catch (err) {
     reply = "(eroare AI: " + (err.message || err) + ")";
   }
@@ -133,12 +139,15 @@ elForm.addEventListener("submit", async (e) => {
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
-async function claudeReply(c, history, retry = 1) {
-  const system =
-    `Ești ${c.name}, un stick-figure din gașca lui Alan Becker (Animator vs. Animation). ` +
+function systemPromptFor(c) {
+  return `Ești ${c.name}, un stick-figure din gașca lui Alan Becker (Animator vs. Animation). ` +
     `Personalitatea ta: ${c.persona} ` +
     `Vorbește în română, natural și prietenos, ca un chatbot inteligent și util (poți răspunde la orice, ca ChatGPT), ` +
     `dar păstrează-ți mereu personalitatea de ${c.name}. Răspunsuri scurte spre medii, conversaționale. Emoji ocazional, nu exagera.`;
+}
+
+async function claudeReply(c, history, retry = 1) {
+  const system = systemPromptFor(c);
   const messages = history.filter(h => h.role === "user" || h.role === "assistant").map(h => ({ role: h.role, content: h.content }));
 
   const res = await fetch("https://api.anthropic.com/v1/messages", {
@@ -156,6 +165,67 @@ async function claudeReply(c, history, retry = 1) {
   const data = await res.json();
   const block = (data.content || []).find(b => b.type === "text");
   return block ? block.text.trim() : "(fără răspuns)";
+}
+
+// ===== AI LOCAL din Google Chrome (Gemini Nano / Prompt API) — gratuit, rulează în browser =====
+// Prioritate răspunsuri: cheie Claude > AI local Chrome (dacă e disponibil) > scriptat.
+const chromeAI = {
+  api: null,          // "new" (LanguageModel) | "old" (window.ai) | null
+  ready: false,       // modelul e utilizabil ACUM
+  status: "checking", // checking | ready | downloading | none
+  sessions: {},       // sesiune per personaj (păstrează contextul conversației)
+  async detect() {
+    try {
+      if (typeof LanguageModel !== "undefined" && LanguageModel.availability) {
+        this.api = "new";
+        const a = await LanguageModel.availability();
+        if (a === "available") { this.ready = true; this.status = "ready"; }
+        else if (a === "downloadable" || a === "downloading") { this.status = "downloading"; this._warm(); }
+        else this.status = "none";
+      } else if (window.ai && window.ai.languageModel) {
+        this.api = "old";
+        const cap = await window.ai.languageModel.capabilities();
+        const av = cap && cap.available;
+        if (av === "readily") { this.ready = true; this.status = "ready"; }
+        else if (av === "after-download") { this.status = "downloading"; this._warm(); }
+        else this.status = "none";
+      } else this.status = "none";
+    } catch (e) { this.status = "none"; }
+    if (typeof refreshBanner === "function") refreshBanner();
+    if (typeof refreshGBanner === "function") refreshGBanner();
+    return this.ready;
+  },
+  async _warm() { // declanșează descărcarea modelului în fundal; când e gata → ready
+    try {
+      const opt = { monitor(m) { try { m.addEventListener("downloadprogress", () => {}); } catch (e) {} } };
+      const s = this.api === "new" ? await LanguageModel.create(opt) : await window.ai.languageModel.create();
+      try { s.destroy && s.destroy(); } catch (e) {}
+      this.ready = true; this.status = "ready";
+      if (typeof refreshBanner === "function") refreshBanner();
+      if (typeof refreshGBanner === "function") refreshGBanner();
+    } catch (e) { this.status = "none"; }
+  },
+  async reply(c, history) {
+    let s = this.sessions[c.id];
+    if (!s) {
+      const sys = systemPromptFor(c);
+      s = this.api === "new"
+        ? await LanguageModel.create({ initialPrompts: [{ role: "system", content: sys }] })
+        : await window.ai.languageModel.create({ systemPrompt: sys });
+      this.sessions[c.id] = s;
+    }
+    const lastUser = [...history].reverse().find(h => h.role === "user");
+    const out = await s.prompt(lastUser ? lastUser.content : "Salut!");
+    return (out || "").trim() || "(fără răspuns)";
+  },
+};
+chromeAI.detect();
+
+// alege backend-ul de răspuns: Claude (cheie) > AI Chrome local > scriptat
+async function aiReply(c, history, msg) {
+  if (hasKey()) return await claudeReply(c, history);
+  if (chromeAI.ready) { try { return await chromeAI.reply(c, history); } catch (e) { return scriptedReply(c, msg); } }
+  return scriptedReply(c, msg);
 }
 
 // ---- fallback scriptat contextual (fără cheie) — nu răspunsuri random ----
@@ -210,7 +280,7 @@ const gForm = gpanel.querySelector(".chat-form");
 const gInput = gForm.querySelector("input");
 const gBanner = gpanel.querySelector(".chat-banner");
 
-function refreshGBanner() { gBanner.classList.add("hidden"); }
+function refreshGBanner() { const t = (typeof aiStatusText === "function") ? aiStatusText() : null; if (t) { gBanner.textContent = t; gBanner.classList.remove("hidden"); } else gBanner.classList.add("hidden"); }
 
 function gAdd(who, name, color, text) {
   const el = document.createElement("div");
@@ -252,7 +322,7 @@ gForm.addEventListener("submit", async (e) => {
     if (!histories[c.id]) histories[c.id] = [];
     histories[c.id].push({ role: "user", content: msg });
     let r;
-    try { r = hasKey() ? await claudeReply(c, histories[c.id]) : scriptedReply(c, msg); }
+    try { r = await aiReply(c, histories[c.id], msg); }
     catch (err) { r = scriptedReply(c, msg); }
     histories[c.id].push({ role: "assistant", content: r });
     if (histories[c.id].length > 40) histories[c.id] = histories[c.id].slice(-40);
