@@ -323,10 +323,15 @@ class Agent {
       if (this.x < -50 || this.x > W + 50) { this.away = true; this.awayTimer = expedition ? expedition.duration : rand(3600, 18000); }
     }
     else if (this.state === "watch") {
-      if (!browserWin) { this.state = "walk"; this.targetX = null; this.stateTimer = rand(30, 90); }
+      if (!browserWin) { this.state = "walk"; this.targetX = null; this.stateTimer = rand(30, 90); this.watchArrived = false; }
       else {
         const dx = this.watchTarget - this.x;
-        if (Math.abs(dx) > 5) { const step = Math.sign(dx) * this.speed * 1.7; this.face = dx >= 0 ? 1 : -1; if (!this.wouldCollide(this.x + step)) { this.x += step; this.walkPhase += 0.13; } }
+        if (Math.abs(dx) > 5 && !this.watchArrived) { const step = Math.sign(dx) * this.speed * 1.7; this.face = dx >= 0 ? 1 : -1; if (!this.wouldCollide(this.x + step)) { this.x += step; this.walkPhase += 0.13; } }
+        else if (!this.watchArrived) { // a ajuns: termină pasul (aduce piciorul la loc) apoi se oprește — nu îngheață brusc
+          const rest = Math.round(this.walkPhase / Math.PI) * Math.PI;
+          if (Math.abs(rest - this.walkPhase) > 0.14) this.walkPhase += 0.13 * (rest > this.walkPhase ? 1 : -1);
+          else { this.walkPhase = rest; this.watchArrived = true; this.face = (browserWin.x + browserWin.w / 2) >= this.x ? 1 : -1; }
+        }
         else { this.face = (browserWin.x + browserWin.w / 2) >= this.x ? 1 : -1; if (!this.say && Math.random() < 0.004) this.speak(pick(["Ooo!", "Haha!", "Tare!", "👀", "Încă unul!"]), 70); }
       }
     }
@@ -401,11 +406,11 @@ class Agent {
       if (!d || !drawings.includes(d)) { this.state = "walk"; this.climbT = null; this.tz = 0; this.targetX = null; return; }
       if (this.climbPhase === "go") {
         const dx = d.cx - this.x;
-        if (Math.abs(dx) < 10) { this.climbPhase = "up"; this.tz = 0; this.hangTz = clamp(groundY - d.cy - 130, 30, groundY - 30); }
+        if (Math.abs(dx) < 10) { this.climbPhase = "up"; this.tz = 0; this.hangTz = clamp(groundY - d.cy - 130, 30, groundY - 30); this.climbV = Math.sqrt(2 * 0.9 * this.hangTz); this.squash = 0.6; spawnDust(this.x, groundY, 5); } // își ia avânt și SARE spre desen
         else if (!this.jumping) { this.x += Math.sign(dx) * this.speed * 1.9; this.face = dx >= 0 ? 1 : -1; this.walkPhase += 0.17; }
-      } else if (this.climbPhase === "up") { // sare sus, se agață
-        this.tz += (this.hangTz - this.tz) * 0.22;
-        if (this.hangTz - this.tz < 4) { this.tz = this.hangTz; this.climbPhase = "hang"; this.hangTimer = 300; this.face = d.cx >= this.x ? 1 : -1; this.speak(pick(["Sus! 🧗", "M-am agățat!"]), 70); }
+      } else if (this.climbPhase === "up") { // salt balistic până se prinde (nu tras ca la grappling hook)
+        this.climbV -= 0.9; this.tz += this.climbV;
+        if (this.tz >= this.hangTz || this.climbV <= 0) { this.tz = this.hangTz; this.climbPhase = "hang"; this.hangTimer = 300; this.face = d.cx >= this.x ? 1 : -1; this.speak(pick(["Sus! 🧗", "M-am agățat!"]), 70); }
       } else if (this.climbPhase === "hang") { // se ține cu o mână 5s
         if (--this.hangTimer <= 0) { this.climbPhase = "fall"; this.climbV = 0; }
         else if (!this.say && Math.random() < 0.008) this.speak(pick(["Nu privi în jos!", "Uau!", "Ajutor?"]), 70);
@@ -484,7 +489,16 @@ class Agent {
       }
     }
     else if (this.state === "sleep") {
-      if (this.sleepPhase === "down") { this.lie = Math.min(1, this.lie + 0.04); if (this.lie >= 1) { this.sleepPhase = "rest"; this.sleepTimer = 1200; } }
+      if (this.sleepPhase === "goto") { // merge spre casă înainte să se culce
+        const h = this.sleepHouse;
+        if (!h || !structures.includes(h)) { this.sleepPhase = "down"; this.sleepDir = Math.random() < 0.5 ? 1 : -1; } // casa a dispărut → doarme pe loc
+        else {
+          const dx = h.x - this.x;
+          if (Math.abs(dx) < 14) { this.sleepPhase = "down"; this.sleepDir = Math.random() < 0.5 ? 1 : -1; this.speak("Zzz", 90); }
+          else if (!this.jumping) { this.x += Math.sign(dx) * this.speed * 1.4; this.face = dx >= 0 ? 1 : -1; this.walkPhase += 0.14; }
+        }
+      }
+      else if (this.sleepPhase === "down") { this.lie = Math.min(1, this.lie + 0.04); if (this.lie >= 1) { this.sleepPhase = "rest"; this.sleepTimer = 1200; } }
       else if (this.sleepPhase === "rest") { if (--this.sleepTimer <= 0) this.sleepPhase = "up"; else if (!this.say && Math.random() < 0.004) this.speak("Zzz", 110); }
       else { this.lie = Math.max(0, this.lie - 0.05); if (this.lie <= 0) { this.state = "walk"; this.targetX = null; this.stateTimer = rand(80, 180); } }
     }
@@ -519,8 +533,16 @@ class Agent {
         this.x += this.face * 1.4; // face un pas înapoi speriat
       } else if (this.targetX === null || this.stateTimer-- <= 0) {
         if (this.sleepCd <= 0) {
-          this.state = "sleep"; this.sleepPhase = "down"; this.lie = 0;
-          this.sleepDir = Math.random() < 0.5 ? 1 : -1; this.speak("...", 60); this.sleepCd = rand(14400, 21600);
+          this.sleepCd = rand(14400, 21600);
+          const houses = structures.filter(s => s.type === "house" && s.progress > 0.6); // doar CASE gata (nu turn/copac/foc)
+          const house = houses.length ? houses.reduce((a, b) => Math.abs(b.x - this.x) < Math.abs(a.x - this.x) ? b : a) : null;
+          if (house) { // merge la culcare ÎN cea mai apropiată casă
+            this.state = "sleep"; this.sleepPhase = "goto"; this.sleepHouse = house; this.lie = 0; this.targetX = null;
+            this.speak(pick(["Mi-e somn... 😴", "Merg la culcare.", "La casă, la nani."]), 90);
+          } else { // nicio casă → doarme pe loc (ca înainte)
+            this.state = "sleep"; this.sleepPhase = "down"; this.lie = 0;
+            this.sleepDir = Math.random() < 0.5 ? 1 : -1; this.speak("...", 60);
+          }
         } else {
           const r = Math.random();
           const foe = this.weapon ? agents.find(o => o !== this && !o.isPlayer && !o.away && !o.opponent && (o.state === "walk" || o.state === "idle") && Math.abs(o.x - this.x) < 480) : null;
@@ -575,19 +597,7 @@ class Agent {
       }
     }
 
-    // salt peste cineva în față (50/50 care sare)
-    if ((this.state === "walk" || this.state === "run") && !this.jumping && this.jumpCd <= 0) {
-      for (const o of agents) {
-        if (o === this || o.away || o.jumping || o.state === "held" || o.state === "thrown" || o.state === "sleep") continue; // nu sări peste cei culcați
-        const dxo = o.x - this.x;
-        if (Math.sign(dxo) === this.face && Math.abs(dxo) > 10 && Math.abs(dxo) < 46) {
-          const headOn = (o.face === -this.face);
-          if (headOn && o.jumpCd <= 0 && Math.random() < 0.5) { o.jumping = true; o.jumpT = 0; }
-          else { this.jumping = true; this.jumpT = 0; }
-          this.jumpCd = 70; o.jumpCd = 70; break;
-        }
-      }
-    }
+    // (dezactivat) nu mai sar unul peste altul — saltul rămâne doar pentru jucător (spacebar)
 
     // salut la trecere
     if (this.greetCd <= 0 && (this.state === "walk")) {
@@ -711,9 +721,10 @@ class Agent {
     const winClimbMove = st === "climbwin" && (this.climbPhase === "up" || this.climbPhase === "fall");
     const winClimbHang = st === "climbwin" && this.climbPhase === "hang";
     const structMove = st === "onstruct" && (this.osPhase === "up" || this.osPhase === "fall");
-    const hanging = st === "climb" || gpClimb || winClimbMove || winClimbHang || structMove;
+    const climbMove = st === "climb" && this.climbPhase !== "go"; // în faza "go" merge normal spre desen (nu ține mâinile sus tot drumul)
+    const hanging = climbMove || gpClimb || winClimbMove || winClimbHang || structMove;
     const painting = (st === "draw") || (st === "gopaint" && this.gpPhase === "draw");
-    const walking = (st === "walk" || st === "run" || st === "fight" || st === "leaving" || st === "scared" || st === "watch" || (st === "gopaint" && this.gpPhase === "go") || (st === "climbwin" && this.climbPhase === "go") || (st === "onwin" && this.onWinVX) || (st === "getweapon" && this._admire === undefined) || (st === "onstruct" && this.osPhase === "go") || (st === "onstruct" && this.osPhase === "stand" && this.osVX));
+    const walking = (st === "walk" || st === "run" || st === "fight" || st === "leaving" || st === "scared" || (st === "watch" && !this.watchArrived) || (st === "gopaint" && this.gpPhase === "go") || (st === "climb" && this.climbPhase === "go") || (st === "climbwin" && this.climbPhase === "go") || (st === "sleep" && this.sleepPhase === "goto") || (st === "onwin" && this.onWinVX) || (st === "getweapon" && this._admire === undefined) || (st === "onstruct" && this.osPhase === "go") || (st === "onstruct" && this.osPhase === "stand" && this.osVX));
     const running = (st === "run" || st === "leaving" || st === "scared");
     const breathe = Math.sin(this.bob) * 1.5;
     const bodyBob = walking ? Math.sin(this.walkPhase * 2) * 2 : breathe;
@@ -742,7 +753,7 @@ class Agent {
       const sway = Math.sin(this.bob * 2) * 6;
       this.legIK(ctx, -3, hipY, -6 + sway, hipY + 48, -1);
       this.legIK(ctx, 3, hipY, 9 + sway, hipY + 48, -1);
-    } else if (st === "sleep" || st === "build" || st === "idle" || painting || (st === "onwin" && !this.onWinVX) || (st === "getweapon" && this._admire !== undefined) || (st === "onstruct" && this.osPhase === "stand" && !this.osVX)) {
+    } else if ((st === "sleep" && this.sleepPhase !== "goto") || st === "build" || st === "idle" || painting || (st === "watch" && this.watchArrived) || (st === "onwin" && !this.onWinVX) || (st === "getweapon" && this._admire !== undefined) || (st === "onstruct" && this.osPhase === "stand" && !this.osVX)) {
       this.legIK(ctx, -4, hipY, -6, 0, -1);
       this.legIK(ctx, 4, hipY, 6, 0, -1);
     } else {
@@ -787,7 +798,7 @@ class Agent {
       seg(22, -2, 42, -6); seg(-10, 12, -6, -2);
     } else if (st === "fight") {
       seg(12, 8, 20, -6); seg(-10, 10, -4, -4);
-    } else if (st === "sleep") {
+    } else if (st === "sleep" && this.sleepPhase !== "goto") {
       seg(-12, 12, -18, 24); seg(12, 12, 18, 24);
     } else {
       const amt = running ? 0.85 : (walking ? 0.55 : 0.12);
@@ -846,7 +857,11 @@ class Agent {
   }
 
   drawFx(ctx) {
-    const feetY = Math.round(groundY);
+    // picioarele urmează elevația (urcat pe clădiri/ferestre/desene, aruncat, ținut, salt) — la fel ca la corp în draw()
+    let feetY = Math.round(groundY);
+    if (this.state === "held") feetY = Math.round(this.heldY);
+    else if (this.state === "thrown" || this.state === "climb" || this.state === "climbwin" || this.state === "onwin" || this.state === "onstruct" || (this.state === "gopaint" && this.tz > 0)) feetY = Math.round(groundY - this.tz);
+    else if (this.jumping) feetY = Math.round(groundY - Math.sin(this.jumpT * Math.PI) * 155);
     const x = Math.round(this.x);
     const headTopScreen = feetY - 150;
 
@@ -904,7 +919,6 @@ class Agent {
       let sx = x, sy = feetY - topOff;
       if (this.lie > 0) sy = feetY - 55;
       if (this.state === "held") { sx = pointer.x; sy = Math.min(this.heldY, groundY) - topOff; }
-      else if (this.state === "thrown") { sy = (groundY - this.tz) - topOff; }
       const lines = wrapText(this.say.text, 28), lh = 19;
       const startY = sy - (lines.length - 1) * lh;
       lines.forEach((ln, i) => { const yy = startY + i * lh; ctx.strokeText(ln, sx, yy); ctx.fillText(ln, sx, yy); });
@@ -1055,8 +1069,11 @@ function nearestAgent(cx, cy) {
     let feetY = groundY;
     if (a.state === "climb" || a.state === "climbwin" || a.state === "onwin" || a.state === "onstruct" || a.state === "thrown" || (a.state === "gopaint" && a.tz > 0)) feetY = groundY - a.tz;
     else if (a.jumping) feetY = groundY - Math.sin(a.jumpT * Math.PI) * 155;
-    const torsoY = feetY - 70, headY = feetY - 100 - a.c.headR;
-    const d = Math.min(Math.hypot(a.x - cx, torsoY - cy), Math.hypot(a.x - cx, headY - cy));
+    // punctele tors/cap; când e aruncat se rotesc cu modelul (aceeași rotație ca tangle)
+    const ang = a.state === "thrown" ? a.tangle : 0, si = Math.sin(ang), co = Math.cos(ang);
+    const tX = a.x + 70 * si, tY = feetY - 70 * co;                        // tors
+    const hL = 100 + a.c.headR, hX = a.x + hL * si, hY = feetY - hL * co;  // cap
+    const d = Math.min(Math.hypot(tX - cx, tY - cy), Math.hypot(hX - cx, hY - cy));
     if (d < bestD) { bestD = d; best = a; }
   }
   return (best && bestD < 90) ? best : null;
@@ -1224,7 +1241,7 @@ function iconAction(name) {
   else if (name === "paint") openPaint();
   else if (name === "start") pick([openChrome, triggerBuild, triggerRandomFight])();
 }
-function openPaint() { const w = Math.min(560, W - 60), h = Math.min(420, groundY - 80); paintWin = { x: Math.round((W - w) / 2), y: 48, w, h, strokes: [], cur: null, color: "#ffffff" }; }
+function openPaint() { const y = 90, w = Math.min(700, W - 40), h = Math.min(520, groundY - y - 40); paintWin = { x: Math.round((W - w) / 2), y, w, h, strokes: [], cur: null, color: "#ffffff" }; }
 function sendToPaint(a) {
   if (!a || a.isPlayer || a.away || a.state === "held" || a.state === "thrown" || a.state === "leaving") return;
   if (a.opponent) a.endFight();
@@ -1239,7 +1256,7 @@ function openWindows() { const l = []; if (browserWin) l.push(browserWin); if (s
 // ferestre pe care se poate STA/urca — include Minecraft (dar Minecraft are drag/resize propriu)
 function standWindows() { const l = openWindows(); if (minecraftWin) l.push(minecraftWin); return l; }
 // case/structuri: cutie de coliziune (pt. apucat) și hit-test
-function structBox(s) { const d = { house: [62, 138], tower: [34, 172], tree: [42, 122], campfire: [40, 56] }[s.type] || [50, 120]; return { hw: d[0], h: d[1] }; }
+function structBox(s) { const d = { house: [62, 138], tower: [34, 172], tree: [42, 122], campfire: [40, 56] }[s.type] || [50, 120]; const sc = s.scale || 1; return { hw: d[0] * sc, h: d[1] * sc }; }
 function structureAt(x, y) { for (let i = structures.length - 1; i >= 0; i--) { const s = structures[i], b = structBox(s), base = s.by || groundY; if (x >= s.x - b.hw && x <= s.x + b.hw && y >= base - b.h && y <= base) return s; } return null; }
 // bara de titlu a unei ferestre (pt. drag), exclude butonul de închidere din dreapta
 function titleBarAt(x, y) { for (const w of openWindows()) if (x >= w.x && x <= w.x + w.w - 30 && y >= w.y && y <= w.y + 28) return w; return null; }
@@ -1258,7 +1275,7 @@ function dropTarget(x, y) {
   for (const d of drawings) if (Math.abs(x - d.cx) < d.s * 1.6 && Math.abs(y - d.cy) < d.s * 1.6) return { type: "draw", d };
   return null;
 }
-function openNotepad() { const t = 'a = 1\nprint(a)'; notepadWin = { x: Math.min(W - 300, Math.round(W / 2 - 140) + 160), y: 66, w: 288, h: 220, text: t, cursor: t.length }; }
+function openNotepad() { const t = 'a = 1\nprint(a)'; const y = 120, w = 360, h = Math.min(300, groundY - y - 40); notepadWin = { x: Math.min(W - w - 20, Math.round(W / 2 - w / 2) + 180), y, w, h, text: t, cursor: t.length }; }
 function closeNotepad() { notepadWin = null; }
 
 // ---- mini-interpretor Python (variabile, print, + - * /) ----
@@ -1741,8 +1758,8 @@ function drawPaint() {
 
 // ---- Cronometru ----
 function openStopwatch() {
-  const w = 240, h = 172;
-  stopwatchWin = { x: Math.max(12, Math.round(W / 2 - w / 2) - 150), y: 66, w, h, running: false, accMs: 0, startT: 0 };
+  const y = 120, w = 300, h = 220;
+  stopwatchWin = { x: Math.max(12, Math.round(W / 2 - w / 2) - 180), y, w, h, running: false, accMs: 0, startT: 0 };
 }
 function closeStopwatch() { stopwatchWin = null; }
 function swElapsed(s) { return s.accMs + (s.running ? performance.now() - s.startT : 0); }
@@ -1783,9 +1800,9 @@ function drawStopwatch() {
   ctx.restore();
 }
 function openChrome(auto) {
-  const w = Math.min(500, W - 60), h = Math.min(320, groundY - 50);
+  const y = 80, w = Math.min(660, W - 40), h = Math.min(440, groundY - y - 40);
   const vid = pick(VIDEOS);
-  browserWin = { x: Math.round(W / 2 - w / 2), y: 36, w, h, title: vid.t, vtype: vid.v, views: (Math.random() * 9 + 0.3).toFixed(1) + "M", t0: frame, dur: rand(780, 1320) }; // videoul ține ~13-22s apoi se închide
+  browserWin = { x: Math.round(W / 2 - w / 2), y, w, h, title: vid.t, vtype: vid.v, views: (Math.random() * 9 + 0.3).toFixed(1) + "M", t0: frame, dur: rand(780, 1320) }; // videoul ține ~13-22s apoi se închide
   const avail = agents.filter(a => !a.isPlayer && (a.state === "walk" || a.state === "idle" || a.state === "scared"));
   avail.forEach((a, i) => { a.state = "watch"; a.lie = 0; a.sleepPhase = null; a.jumping = false; if (a.opponent) a.endFight(); a.watchTarget = browserWin.x + w * 0.12 + i * (w * 0.76) / Math.max(1, avail.length - 1); });
 }
@@ -2065,8 +2082,14 @@ function drawHitboxes() {
     else if (a.state === "thrown") { baseY = groundY - a.tz; }
     else if (a.state === "climb" || (a.state === "gopaint" && a.tz > 0)) { baseY = groundY - a.tz; }
     else if (a.jumping) { baseY = groundY - Math.sin(a.jumpT * Math.PI) * 155; } // hitboxul sare cu modelul
-    ctx.strokeRect(cx - half, baseY - bodyH, half * 2, bodyH);
-    ctx.fillText(a.c.name, cx, baseY - bodyH - 5);
+    if (a.state === "thrown") { // hitboxul se rotește cu modelul
+      ctx.save(); ctx.translate(cx, baseY); ctx.rotate(a.tangle);
+      ctx.strokeRect(-half, -bodyH, half * 2, bodyH); ctx.fillText(a.c.name, 0, -bodyH - 5);
+      ctx.restore();
+    } else {
+      ctx.strokeRect(cx - half, baseY - bodyH, half * 2, bodyH);
+      ctx.fillText(a.c.name, cx, baseY - bodyH - 5);
+    }
   }
   ctx.restore();
 }
@@ -2192,7 +2215,7 @@ function blk(x, y, s, fill) {
 
 // construcții din blocuri stil Minecraft, cresc de jos în sus cu progresul
 function drawStructure(s) {
-  const B = 15, x = s.x, base = s.by || groundY, p = s.progress, col = s.color;
+  const B = 15 * (s.scale || 1), x = s.x, base = s.by || groundY, p = s.progress, col = s.color;
   const put = (cx, cy, fill) => blk(x + cx * B - B / 2, base - (cy + 1) * B, B, fill);
 
   if (s.type === "house") {
@@ -2299,5 +2322,7 @@ function loop() {
 window.addEventListener("resize", resize);
 resize();
 initAgents();
+// casă mică fixă din blocuri (stil AvM) — pre-construită la refresh, unde merg să doarmă
+structures.push({ x: clamp(Math.round(W * 0.8), 120, W - 120), color: "#8a5f39", progress: 1, type: "house", scale: 0.85, preset: true });
 window.agents = agents; // expus pentru inspecție/feedback (ex. Playwright)
 loop();
