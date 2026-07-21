@@ -174,16 +174,18 @@ class Agent {
       this.onDraw = null; this.state = "thrown"; this.tzv = 0; this.tvx = 0; this.tangle = 0; this.tangVel = 0; this.bounces = 0; return;
     }
     this.tz = groundY - (d.cy - d.s);            // rămâne pe top (chiar dacă desenul e mutat cândva)
-    const lo = d.cx - d.s + 6, hi = d.cx + d.s - 6;
+    const lo = d.cx - d.s, hi = d.cx + d.s;      // marginile suprafeței
     if (--this.onDrawTimer <= 0) {
-      if (Math.random() < 0.4) { this.onDrawVX = (Math.random() < 0.5 ? -1 : 1) * this.speed; this.onDrawTimer = rand(40, 110); }
+      if (Math.random() < 0.5) { this.onDrawVX = (Math.random() < 0.5 ? -1 : 1) * this.speed; this.onDrawTimer = rand(50, 130); }
       else { this.onDrawVX = 0; this.onDrawTimer = rand(40, 100); }
     }
     if (this.onDrawVX) {
       this.x += this.onDrawVX; this.face = Math.sign(this.onDrawVX); this.walkPhase += 0.14;
-      if (this.x <= lo || this.x >= hi) this.onDrawVX *= -1;
+      if (this.x < lo || this.x > hi) { // a pășit peste margine → cade (poate ateriza pe alt desen mai jos, sau pe jos)
+        this.onDraw = null; this.state = "thrown"; this.tzv = 0; this.tvx = this.onDrawVX * 0.6; this.tangle = 0; this.tangVel = 0; this.bounces = 0;
+        return;
+      }
     }
-    this.x = clamp(this.x, lo, hi);
   }
 
   returnFromAdventure(W) {
@@ -693,14 +695,26 @@ class Agent {
         return;
       }
     }
-    // aterizează pe partea de sus a unui desen (coliziune ca la ferestre)
+    // aterizează pe partea de sus a desenului ȚINTIT (drop) — rază largă cât cutia de drop
     const ld = this.landDrawing;
     if (ld && this.tzv > 0 && drawings.includes(ld)) {
-      const top = ld.cy - ld.s, hw = ld.s * 1.6; // raza de aterizare = cutia de drop (dropTarget)
+      const top = ld.cy - ld.s, hw = ld.s * 1.6;
       if (this.x >= ld.cx - hw && this.x <= ld.cx + hw && this.tz <= groundY - top) {
         this.landDrawing = null; this.tangle = 0; this.tangVel = 0; this.squash = 1;
         this.landOnDrawing(ld);
         return;
+      }
+    }
+    // aterizează pe ORICE desen peste care cade de sus (nu doar cel țintit) — nu mai cade prin
+    if (this.tzv > 0) {
+      const prevTz = this.tz + this.tzv; // tz în cadrul anterior (înainte de gravitație)
+      for (const d of drawings) {
+        const top = d.cy - d.s;
+        if (this.x >= d.cx - d.s && this.x <= d.cx + d.s && prevTz > groundY - top && this.tz <= groundY - top) {
+          this.landDrawing = null; this.tangle = 0; this.tangVel = 0; this.squash = 1;
+          this.landOnDrawing(d);
+          return;
+        }
       }
     }
     if (this.tz <= 0) {
