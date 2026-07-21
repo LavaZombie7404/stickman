@@ -664,26 +664,30 @@ class Agent {
     if (this.burnCd > 0) this.burnCd--;
     if (this.waterAnim > 0) this.waterAnim--;
     if (this.burning) { if (--this.burnTimer <= 0) { this.burning = false; this.burnCd = 120; } }
-    else if (this.burnCd <= 0) { for (const s of structures) if (s.type === "campfire" && s.progress > 0.5 && !s.out && Math.abs(s.x - this.x) < 26) { this.burning = true; this.burnTimer = 300; break; } }
-    // salt
-    if (this.jumping) {
-      this.jumpT += 1 / 34;
-      this.x += this.face * (this.speed + 1.6);
-      this.walkPhase += 0.16;
-      if (this.jumpT >= 1) { this.jumping = false; this.jumpT = 0; this.jumpCd = 20; this.squash = 1; spawnDust(this.x, groundY, 5); }
-    } else {
-      let dir = 0;
-      if (keys.has("a") || keys.has("arrowleft")) dir -= 1;
-      if (keys.has("d") || keys.has("arrowright")) dir += 1;
-      if (dir) {
-        this.face = dir;
-        const sprint = sprintHeld ? 1.9 : 1;                          // Ctrl/Shift = fugă (sprint)
-        this.x += dir * this.speed * 2.4 * sprint;
-        this.walkPhase += 0.16 * sprint;                              // picioarele se mișcă mai repede la sprint
-        if (sprint > 1 && frame % 5 === 0) spawnDust(this.x, groundY, 2); // praf de sprint
-        this.state = "run";
-      } else this.state = "idle";
+    else if (this.burnCd <= 0 && this.tz <= 0) { for (const s of structures) if (s.type === "campfire" && s.progress > 0.5 && !s.out && Math.abs(s.x - this.x) < 26) { this.burning = true; this.burnTimer = 300; break; } }
+    // mișcare orizontală (mers / sprint cu Ctrl-Shift)
+    const sprint = sprintHeld ? 1.9 : 1;
+    let dir = 0;
+    if (keys.has("a") || keys.has("arrowleft")) dir -= 1;
+    if (keys.has("d") || keys.has("arrowright")) dir += 1;
+    if (dir) { this.face = dir; this.x += dir * this.speed * 2.4 * sprint; this.walkPhase += 0.16 * sprint; if (sprint > 1 && this.tz <= 0 && frame % 5 === 0) spawnDust(this.x, groundY, 2); }
+    // PARKOUR: fizică verticală cu platforme = desenele din fundal
+    const platTz = (d) => groundY - (d.cy - d.s);              // nivelul tz al vârfului desenului
+    const inX = (d) => this.x >= d.cx - d.s && this.x <= d.cx + d.s;
+    const grounded = this.tz <= 0 || (this.onPlat && drawings.includes(this.onPlat) && inX(this.onPlat) && Math.abs(this.tz - platTz(this.onPlat)) < 3);
+    if (this.wantJump) { this.wantJump = false; if (grounded && this.jumpCd <= 0) { this.pzv = 13.5; this.jumpCd = 8; this.onPlat = null; this.squash = 1; spawnDust(this.x, groundY - this.tz, 4); } }
+    const prevTz = this.tz;
+    this.pzv = (this.pzv || 0) - 0.9;                          // gravitație
+    this.tz += this.pzv;
+    if (this.pzv <= 0) {                                       // coboară → aterizează pe cel mai înalt desen de sub picioare
+      let bestTz = -1, best = null;
+      for (const d of drawings) { if (!inX(d)) continue; const pt = platTz(d); if (pt > 0 && prevTz >= pt - 2 && this.tz <= pt && pt > bestTz) { bestTz = pt; best = d; } }
+      if (best) { this.tz = bestTz; this.pzv = 0; this.onPlat = best; if (prevTz - bestTz > 6) { this.squash = 1; spawnDust(this.x, groundY - this.tz, 4); } }
     }
+    if (this.tz <= 0) { this.tz = 0; this.pzv = 0; this.onPlat = null; }
+    if (this.onPlat && (!inX(this.onPlat) || Math.abs(this.tz - platTz(this.onPlat)) > 3)) this.onPlat = null; // a pășit peste margine → cade
+    this.jumping = this.tz > 0.5;                              // poză de salt când e în aer
+    this.state = (dir || this.tz > 0.5) ? "run" : "idle";
     this.x = clamp(this.x, 60, W - 60);
   }
 
@@ -763,7 +767,7 @@ class Agent {
     } else if (this.state === "thrown") {
       ctx.translate(this.x, groundY - this.tz);
       ctx.rotate(this.tangle);
-    } else if (this.state === "climb" || this.state === "climbwin" || this.state === "onwin" || this.state === "onstruct" || this.state === "ondraw" || (this.state === "gopaint" && this.tz > 0)) {
+    } else if (this.state === "climb" || this.state === "climbwin" || this.state === "onwin" || this.state === "onstruct" || this.state === "ondraw" || (this.isPlayer && this.tz > 0.5) || (this.state === "gopaint" && this.tz > 0)) {
       ctx.translate(Math.round(this.x), Math.round(groundY - this.tz));
       if (this.squash > 0.02) { scaleY *= 1 - this.squash * 0.28; scaleX *= 1 + this.squash * 0.24; }
     } else {
@@ -936,7 +940,7 @@ class Agent {
     // picioarele urmează elevația (urcat pe clădiri/ferestre/desene, aruncat, ținut, salt) — la fel ca la corp în draw()
     let feetY = Math.round(groundY);
     if (this.state === "held") feetY = Math.round(this.heldY);
-    else if (this.state === "thrown" || this.state === "climb" || this.state === "climbwin" || this.state === "onwin" || this.state === "onstruct" || this.state === "ondraw" || (this.state === "gopaint" && this.tz > 0)) feetY = Math.round(groundY - this.tz);
+    else if (this.state === "thrown" || this.state === "climb" || this.state === "climbwin" || this.state === "onwin" || this.state === "onstruct" || this.state === "ondraw" || (this.isPlayer && this.tz > 0.5) || (this.state === "gopaint" && this.tz > 0)) feetY = Math.round(groundY - this.tz);
     else if (this.jumping) feetY = Math.round(groundY - Math.sin(this.jumpT * Math.PI) * 155);
     const x = Math.round(this.x);
     const headTopScreen = feetY - 150;
@@ -1144,7 +1148,7 @@ function nearestAgent(cx, cy) {
   for (const a of agents) {
     if (a.away) continue;
     let feetY = groundY;
-    if (a.state === "climb" || a.state === "climbwin" || a.state === "onwin" || a.state === "onstruct" || a.state === "ondraw" || a.state === "thrown" || (a.state === "gopaint" && a.tz > 0)) feetY = groundY - a.tz;
+    if (a.state === "climb" || a.state === "climbwin" || a.state === "onwin" || a.state === "onstruct" || a.state === "ondraw" || a.state === "thrown" || (a.isPlayer && a.tz > 0.5) || (a.state === "gopaint" && a.tz > 0)) feetY = groundY - a.tz;
     else if (a.jumping) feetY = groundY - Math.sin(a.jumpT * Math.PI) * 155;
     // punctele tors/cap; când e aruncat se rotesc cu modelul (aceeași rotație ca tangle)
     const ang = a.state === "thrown" ? a.tangle : 0, si = Math.sin(ang), co = Math.cos(ang);
@@ -2157,7 +2161,7 @@ window.addEventListener("keydown", (e) => {
   if (k === "t") { removePlayers(); return; }
   if (k === "h") { showHitboxes = !showHitboxes; return; }
   if (k === "g") { fxLevel = fxLevel < 0.05 ? 0.1 : (fxLevel < 0.2 ? 0.35 : (fxLevel < 0.6 ? 0.7 : 0)); return; } // intensitate shader WebGL
-  if (k === " " || k === "spacebar") { if (player && !player.jumping && player.jumpCd <= 0) { player.jumping = true; player.jumpT = 0; } e.preventDefault(); return; }
+  if (k === " " || k === "spacebar") { if (player) player.wantJump = true; e.preventDefault(); return; }
   sprintHeld = e.ctrlKey || e.shiftKey; // Ctrl/Shift ținut = fugă (sprint)
   if (k === "control" || k === "shift") { e.preventDefault(); return; }
   if (k === "a" || k === "d" || k === "arrowleft" || k === "arrowright") { keys.add(k); if (k.startsWith("arrow") || e.ctrlKey) e.preventDefault(); } // preventDefault la Ctrl+A/D ca să nu declanșeze scurtături de browser
