@@ -2131,6 +2131,7 @@ function removePlayers() {
 
 // tastatură: Notepad deschis → scrii în el; altfel comenzi joc (R/H/Space/A/D/săgeți)
 window.addEventListener("keydown", (e) => {
+  if (e.ctrlKey && (e.key === "w" || e.key === "W")) { e.preventDefault(); return; } // Ctrl+W (închidere tab) — încearcă să-l blochezi (best-effort; guard-ul real e beforeunload)
   const el = e.target; // scrii într-un câmp (chat) → lasă tastele browserului (spații, litere), nu le fura pt. joc
   if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable)) return;
   if (notepadWin) {
@@ -2163,6 +2164,8 @@ window.addEventListener("keydown", (e) => {
 });
 window.addEventListener("keyup", (e) => { keys.delete(e.key.toLowerCase()); sprintHeld = e.ctrlKey || e.shiftKey; });
 window.addEventListener("blur", () => { keys.clear(); sprintHeld = false; }); // pierde focusul → nu rămâne blocat pe sprint/mers
+// împiedică închiderea accidentală a tab-ului (Ctrl+W etc.) — browserul cere confirmare. Auto-reload-ul trece prin (setează window.__allowReload).
+window.addEventListener("beforeunload", (e) => { if (!window.__allowReload) { e.preventDefault(); e.returnValue = ""; } });
 function drawHitboxes() {
   ctx.save();
   ctx.strokeStyle = "#ffffff"; ctx.lineWidth = 1.5; ctx.globalAlpha = 0.85;

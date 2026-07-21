@@ -28,7 +28,7 @@
       stamp().then(function (s) {
         if (!s.replace(/\|/g, "")) return;   // nu am putut citi nimic → nu face nimic
         if (sig === null) sig = s;
-        else if (s !== sig) location.reload(); // s-a schimbat ceva → reincarca
+        else if (s !== sig) { window.__allowReload = true; location.reload(); } // s-a schimbat ceva → reincarca (fara confirmare)
       });
     }
     setInterval(check, 4000);
