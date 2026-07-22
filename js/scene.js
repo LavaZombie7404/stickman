@@ -31,10 +31,147 @@ function solveIK(ax, ay, bx, by, l1, l2, bend) {
   return { x: mx - ny * h * bend, y: my + nx * h * bend };
 }
 
-function spawnDust(x, y, n) {
-  for (let i = 0; i < n; i++) {
-    particles.push({ x, y, vx: rand(-2.2, 2.2), vy: rand(-2.6, -0.3), life: rand(18, 32), r: rand(2, 5) });
+// "#RRGGBB" + transparență → "rgba(...)"
+function hexA(hex, a) {
+  const h = String(hex).replace("#", "");
+  const n = parseInt(h.length === 3 ? h.split("").map(x => x + x).join("") : h, 16);
+  return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
+}
+
+// ================== FX DE IMPACT (stil Alan Becker) ==================
+// freeze-frame + zgâlțâit + inele de șoc + scântei + linii de viteză + onomatopee.
+// Totul trece prin `impact()`, ca fiecare lovitură din joc să aibă aceeași greutate.
+let shakeMag = 0, shakeX = 0, shakeY = 0;   // zgâlțâitul camerei
+let hitStop = 0;                            // cadre în care simularea stă pe loc (impactul „îngheață")
+let slowMo = 0;                             // cadre de slow-motion (KO-uri, finisher-e)
+let fightHeat = 0;                          // cât de aprinsă e bătaia acum (0..1) — urcă la fiecare lovitură
+const fx = [];                              // efecte de ecran: inele, fulgere, linii, texte
+
+function shakeScreen(m) { shakeMag = Math.min(30, Math.max(shakeMag, m)); }
+function freeze(f) { hitStop = Math.max(hitStop, f); }
+function addFx(o) { o.max = o.life; fx.push(o); if (fx.length > 46) fx.shift(); return o; }
+// bulgărele de lumină e desenat o singură dată într-o textură și apoi doar scalat
+// (un gradient radial pe cadru, pentru fiecare fulger, ar mânca tot CPU-ul)
+const flashSprite = (() => {
+  const c = document.createElement("canvas"); c.width = c.height = 96;
+  const g = c.getContext("2d"), rg = g.createRadialGradient(48, 48, 0, 48, 48, 48);
+  rg.addColorStop(0, "rgba(255,255,255,1)"); rg.addColorStop(0.45, "rgba(255,255,255,0.45)"); rg.addColorStop(1, "rgba(255,255,255,0)");
+  g.fillStyle = rg; g.fillRect(0, 0, 96, 96);
+  return c;
+})();
+// aureole colorate — desenate o dată per culoare, apoi doar scalate (nu gradient pe cadru)
+const _auraCache = new Map();
+function auraSprite(color) {
+  let c = _auraCache.get(color);
+  if (!c) {
+    c = document.createElement("canvas"); c.width = c.height = 128;
+    const g = c.getContext("2d"), rg = g.createRadialGradient(64, 64, 4, 64, 64, 64);
+    rg.addColorStop(0, hexA(color, 1)); rg.addColorStop(0.55, hexA(color, 0.35)); rg.addColorStop(1, hexA(color, 0));
+    g.fillStyle = rg; g.fillRect(0, 0, 128, 128);
+    _auraCache.set(color, c);
   }
+  return c;
+}
+
+function spawnParticles(x, y, n, o) {
+  o = o || {};
+  for (let i = 0; i < n; i++) {
+    const a = o.ang === undefined ? rand(0, 6.283) : o.ang + rand(-(o.spread === undefined ? 3.14 : o.spread), o.spread === undefined ? 3.14 : o.spread);
+    const sp = rand(o.spMin === undefined ? 1 : o.spMin, o.spMax === undefined ? 4 : o.spMax);
+    particles.push({
+      x, y, vx: Math.cos(a) * sp + (o.vx || 0), vy: Math.sin(a) * sp + (o.vy || 0),
+      life: rand(o.lifeMin === undefined ? 18 : o.lifeMin, o.lifeMax === undefined ? 32 : o.lifeMax),
+      r: rand(o.rMin === undefined ? 2 : o.rMin, o.rMax === undefined ? 5 : o.rMax),
+      g: o.g === undefined ? 0.12 : o.g, drag: o.drag === undefined ? 1 : o.drag,
+      color: o.color || null, glow: o.glow || 0, streak: o.streak || 0,
+    });
+  }
+  if (particles.length > 420) particles.splice(0, particles.length - 420);
+}
+function spawnDust(x, y, n) { spawnParticles(x, y, n, { spMin: 0.6, spMax: 2.6, ang: -1.57, spread: 1.5, rMin: 2, rMax: 5 }); }
+// scântei rapide, colorate, cu dâră — nucleul senzației de lovitură
+function spawnSparks(x, y, n, color, power) {
+  spawnParticles(x, y, n, { color, glow: 1, streak: 1, spMin: 3 * power, spMax: 13 * power, rMin: 1.4, rMax: 3.4, g: 0.22, drag: 0.94, lifeMin: 12, lifeMax: 26 });
+}
+const IMPACT_WORDS = ["BAM!", "POC!", "PAF!", "BUM!", "TRAOSC!", "ZDRANG!"];
+// power: 0.4 = ciupitură, 1 = lovitură normală, 2 = finisher devastator
+function impact(x, y, power, color, word) {
+  const p = clamp(power, 0.2, 2.4);
+  addFx({ t: "ring", x, y, r0: 6 * p, r1: 40 + 46 * p, life: Math.round(12 + 8 * p), color: color || "#ffffff", lw: 2 + 2.4 * p });
+  addFx({ t: "flash", x, y, r: 26 + 34 * p, life: Math.round(5 + 4 * p) });
+  spawnSparks(x, y, Math.round(7 + 13 * p), color || "#ffffff", 0.6 + p * 0.6);
+  shakeScreen(2.6 * p * p);
+  freeze(Math.round(1 + 3.4 * p));
+  fightHeat = Math.min(1, fightHeat + 0.16 * p);
+  if (p >= 0.9) addFx({ t: "lines", x, y, n: Math.round(7 + 6 * p), len: 30 + 40 * p, life: Math.round(8 + 5 * p), color: color || "#ffffff" });
+  if (p >= 1.35 || word) addFx({ t: "word", x, y: y - 58, s: word || pick(IMPACT_WORDS), life: 32, color: color || "#ffffff", size: 15 + 8 * p });
+}
+// undă de șoc pe sol (aterizări grele, finisher-e)
+function groundShock(x, power) {
+  addFx({ t: "shock", x, y: groundY, r0: 8, r1: 70 + 90 * power, life: 20, color: "#ffffff", lw: 2 + 2 * power });
+  spawnParticles(x, groundY, Math.round(8 + 10 * power), { ang: -1.57, spread: 1.25, spMin: 2, spMax: 6 + 4 * power, rMin: 2, rMax: 6, g: 0.3, lifeMin: 16, lifeMax: 30 });
+}
+function updateFx() {
+  for (let i = fx.length - 1; i >= 0; i--) if (--fx[i].life <= 0) fx.splice(i, 1);
+  if (fightHeat > 0) fightHeat = Math.max(0, fightHeat - 0.006);
+}
+function drawFxLayer() {
+  ctx.save();
+  for (const e of fx) {
+    const p = 1 - e.life / e.max;             // 0 → 1 pe durata efectului
+    if (e.t === "ring" || e.t === "shock") {
+      const R = e.r0 + (e.r1 - e.r0) * (1 - (1 - p) * (1 - p)); // se deschide rapid, apoi încetinește
+      ctx.globalAlpha = (1 - p) * 0.95; ctx.strokeStyle = e.color; ctx.lineWidth = e.lw * (1 - p * 0.7);
+      ctx.beginPath();
+      if (e.t === "shock") ctx.ellipse(e.x, e.y, R, R * 0.28, 0, 0, Math.PI * 2); else ctx.arc(e.x, e.y, R, 0, Math.PI * 2);
+      ctx.stroke();
+    } else if (e.t === "flash") {
+      const R = e.r * (0.5 + p * 0.9);
+      ctx.globalAlpha = (1 - p) * 0.95;
+      ctx.drawImage(flashSprite, e.x - R, e.y - R, R * 2, R * 2);
+    } else if (e.t === "lines") {
+      ctx.globalAlpha = (1 - p) * 0.9; ctx.strokeStyle = e.color; ctx.lineWidth = 2.5; ctx.lineCap = "round";
+      ctx.beginPath();
+      for (let k = 0; k < e.n; k++) {
+        const a = (k / e.n) * Math.PI * 2 + e.x * 0.01, r0 = 14 + p * e.len, r1 = r0 + e.len * 0.55 * (1 - p);
+        ctx.moveTo(e.x + Math.cos(a) * r0, e.y + Math.sin(a) * r0); ctx.lineTo(e.x + Math.cos(a) * r1, e.y + Math.sin(a) * r1);
+      }
+      ctx.stroke();
+    } else if (e.t === "word") {
+      const s = e.size * (1 + (1 - Math.min(1, p * 5)) * 0.35);  // țâșnește mare, apoi se așază
+      ctx.globalAlpha = Math.min(1, (1 - p) * 2.2);
+      ctx.font = `900 ${s}px 'Segoe UI', Impact, sans-serif`; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.lineWidth = 5; ctx.strokeStyle = "rgba(0,0,0,0.75)"; ctx.lineJoin = "round";
+      ctx.save(); ctx.translate(e.x, e.y - p * 26); ctx.rotate((e.x % 7 - 3.5) * 0.02);
+      ctx.strokeText(e.s, 0, 0); ctx.fillStyle = e.color; ctx.fillText(e.s, 0, 0);
+      ctx.restore();
+    } else if (e.t === "beam") {
+      const a = Math.min(1, (1 - p) * 3), w = e.w * (0.4 + Math.sin(p * Math.PI) * 0.8);
+      ctx.globalAlpha = a; ctx.lineCap = "round";
+      ctx.strokeStyle = e.color; ctx.shadowColor = e.color; ctx.shadowBlur = 26; ctx.lineWidth = w;
+      ctx.beginPath(); ctx.moveTo(e.x, e.y); ctx.lineTo(e.x2, e.y2); ctx.stroke();
+      ctx.shadowBlur = 0; ctx.strokeStyle = "#ffffff"; ctx.lineWidth = w * 0.42;
+      ctx.beginPath(); ctx.moveTo(e.x, e.y); ctx.lineTo(e.x2, e.y2); ctx.stroke();
+    } else if (e.t === "slash") {
+      ctx.globalAlpha = (1 - p) * 0.9; ctx.strokeStyle = e.color; ctx.lineWidth = 7 * (1 - p); ctx.lineCap = "round";
+      ctx.beginPath(); ctx.arc(e.x, e.y, e.r, e.a0, e.a1); ctx.stroke();
+    }
+  }
+  ctx.restore();
+}
+// vignetă roșiatică + linii pe margini când bătaia se încinge
+let _heatGrad = null, _heatW = 0, _heatH = 0;
+function drawHeatOverlay() {
+  if (fightHeat < 0.15) return;
+  if (!_heatGrad || _heatW !== W || _heatH !== H) {   // gradientul se face o singură dată, nu în fiecare cadru
+    _heatGrad = ctx.createRadialGradient(W / 2, groundY * 0.55, Math.min(W, H) * 0.28, W / 2, groundY * 0.55, Math.max(W, H) * 0.72);
+    _heatGrad.addColorStop(0, "rgba(255,60,0,0)"); _heatGrad.addColorStop(1, "rgba(255,50,0,1)");
+    _heatW = W; _heatH = H;
+  }
+  ctx.save();
+  ctx.globalAlpha = ((fightHeat - 0.15) / 0.85) * 0.3;
+  ctx.fillStyle = _heatGrad; ctx.fillRect(0, 0, W, H);
+  ctx.restore();
 }
 
 function wrapText(text, maxLen) {
@@ -56,6 +193,20 @@ function shade(hex, f) {
   return `rgb(${r},${g},${b})`;
 }
 
+// ---- repertoriul de lovituri corp la corp ----
+// dur = cadre de animație, reach = raza la care mai prinde, at = unde pocnește (cap/piept)
+const MOVES = [
+  { id: "punch", dmg: 7, dur: 13, reach: 66, knock: 4, stun: 8, power: 0.85 },
+  { id: "kick", dmg: 9, dur: 16, reach: 78, knock: 6, stun: 10, power: 1.0 },
+  { id: "elbow", dmg: 8, dur: 13, reach: 58, knock: 3, stun: 11, power: 0.9, at: "head" },
+];
+const FINISHERS = [
+  { id: "upper", dmg: 19, dur: 22, reach: 68, knock: 3, stun: 22, power: 1.7, at: "head", launch: [5, 18], word: "UPERCUT!" },
+  { id: "heavy", dmg: 21, dur: 24, reach: 84, knock: 15, stun: 24, power: 1.9, launch: [17, 10], word: "PLEOSC!" },
+  { id: "sweep", dmg: 15, dur: 20, reach: 76, knock: 7, stun: 26, power: 1.5, launch: [9, 13], word: "MĂTURAT!" },
+];
+const SWORD_MOVE = { id: "slash", dmg: 24, dur: 18, reach: 88, knock: 11, stun: 22, power: 1.6, word: "ȘVAAAP!" };
+
 class Agent {
   constructor(c, W) {
     this.c = c;
@@ -74,8 +225,20 @@ class Agent {
     this.attacker = false;
     this.attackType = "punch";
     this.attackAnim = 0;
+    this.attackDur = 16;
     this.recoil = 0;
     this.stars = [];
+    // ---- luptă ----
+    this.maxHp = 70; this.hp = 70;   // bătăile se termină în ~10s, cu KO
+    this.hpShow = 0;      // cât timp se mai vede bara de viață
+    this.hpGhost = 100;   // bara „fantomă" care coboară cu întârziere (se vede cât ai încasat)
+    this.combo = 0; this.comboCd = 0;
+    this.stun = 0;        // amețit: nu poate ataca/para
+    this.guard = 0;       // cadre de blocare activă
+    this.chargeT = 0;     // încarcă un orb de energie
+    this.hitFlash = 0;    // model alb o clipă la impact
+    this.knock = 0;       // recul orizontal (knockback)
+    this.aura = 0;        // strălucire în jurul lui cât e în luptă
     this.say = null;
     this.chatterTimer = rand(300, 900);
     this.lie = 0;
@@ -218,18 +381,13 @@ class Agent {
     if (ambient && typeof window.onStickSpeak === "function") window.onStickSpeak(this.c.id, text);
   }
 
-  getHit(fromX) {
+  getHit(fromX) {   // pumn dat cu mouse-ul
     if (this.hitCooldown > 0 || this.state === "held" || this.state === "thrown") return;
-    this.hitCooldown = 40;
-    this.state = "hit";
-    this.stateTimer = 40;
+    this.hitCooldown = 18;
     this.lie = 0; this.sleepPhase = null; this.building = null;
-    this.vx = (this.x >= fromX ? 1 : -1) * 10;
-    this.recoil = 16;
     this.stars = [];
     for (let i = 0; i < 4; i++) this.stars.push({ ang: (Math.PI * 2 * i) / 4, r: 30 });
-    this.speak(pick(this.c.hitLines), 70);
-    if (this.opponent) this.endFight();
+    this.damage(11, fromX, { power: 1.1, knock: 11, stun: 20, recoil: 16, attacker: player && player.isPlayer ? player : null });
   }
 
   grab() {
@@ -253,21 +411,147 @@ class Agent {
     this.speak(pick(["Woohoo!", "Aaaa!", "Zbooor!"]), 80);
   }
 
-  die() { // lovit mortal de sabie → cade, apoi reînvie
+  // ---------- LUPTĂ ----------
+  headY() { return groundY - this.feetOffset() - 96 - this.c.headR; }  // înălțimea capului pe ecran
+  chestY() { return groundY - this.feetOffset() - 84; }
+  feetOffset() {  // cât de sus sunt tălpile față de sol (salt, urcat, aruncat)
+    if (this.state === "held") return groundY - this.heldY;
+    if (this.jumping && !this.isPlayer) return Math.sin(this.jumpT * Math.PI) * 155;
+    return this.tz || 0;
+  }
+  canBeHit() { return !this.away && this.state !== "dead" && this.state !== "held"; }
+
+  // o lovitură încasată: daune + recul + tot arsenalul vizual
+  damage(dmg, fromX, o) {
+    o = o || {};
+    if (!this.canBeHit()) return false;
+    const dir = this.x >= fromX ? 1 : -1;
+    // BLOCARE: dacă ține garda și lovitura vine din față, o oprește
+    if (this.guard > 0 && !o.unblockable && Math.sign(this.x - fromX) !== this.face) {
+      this.guard = 0; this.knock += dir * 3.2;
+      impact(this.x + this.face * 20, this.chestY(), 0.55, "#dfe6f2", "PAR!");
+      spawnSparks(this.x + this.face * 22, this.chestY(), 12, "#ffffff", 1.2);
+      this.speak(pick(["Blocat!", "Nu ține!", "Ha!"]), 34);
+      if (o.attacker) { o.attacker.knock -= dir * 5; o.attacker.stun = 26; o.attacker.combo = 0; }
+      return false;
+    }
+    this.hp = Math.max(0, this.hp - dmg);
+    this.hpShow = 220; this.hitFlash = 7;
+    this.stun = Math.max(this.stun, o.stun === undefined ? 14 : o.stun);
+    this.knock += dir * (o.knock === undefined ? 6 : o.knock);
+    this.recoil = o.recoil || 14;
+    this.stars = [{ ang: 0, r: 24 }, { ang: 2, r: 24 }, { ang: 4, r: 24 }];
+    this.squash = 1;
+    // orice făcea (dormea, construia, desena) se întrerupe brusc
+    if (!this.isPlayer && this.state !== "fight" && this.state !== "thrown" && this.state !== "dead") {
+      this.state = "hit"; this.stateTimer = Math.max(24, o.stun || 14); this.vx = 0;
+      this.lie = 0; this.sleepPhase = null; this.building = null; this.inHouse = null; this.targetX = null;
+    }
+    const p = o.power || 1;
+    impact(this.x + dir * -8, o.at === "head" ? this.headY() : this.chestY(), p, this.c.color, o.word);
+    if (!this.say || p > 1) this.speak(pick(this.c.hitLines), 45);
+    // LANSARE: finisher-ele îl trimit prin aer (fizica de „aruncat" există deja)
+    if (o.launch) { this.launch(dir * o.launch[0], o.launch[1]); }
+    if (this.hp <= 0) { this.knockout(dir); return true; }
+    // lovit de jucător → se enervează și ripostează (nu mai fuge doar speriat)
+    if (o.attacker && o.attacker.isPlayer && !this.opponent && !this.isPlayer && this.state !== "dead" && this.state !== "thrown" && Math.random() < 0.75) {
+      this.startFight(o.attacker, true);   // ripostează, dar cu viața rămasă (nu se vindecă)
+    }
+    return true;
+  }
+  launch(vx, vz) {
+    if (this.state === "held" || this.state === "dead") return;
+    // ține minte cu cine se bătea: după ce aterizează se ridică și se întoarce la bătaie
+    const foe = this.opponent;
+    if (foe && this.hp > 0) { this._resumeFoe = foe; foe.opponent = this; }
+    else if (this.opponent) this.endFight();
+    this.opponent = null;
+    this.state = "thrown"; this.tz = Math.max(this.tz || 0, this.feetOffset());
+    this.tvx = clamp(vx, -30, 30); this.tzv = -Math.abs(vz);
+    this.tangle = 0; this.tangVel = clamp(vx, -26, 26) * 0.035; this.bounces = 0;
+    this.landWin = this.landStruct = this.landDrawing = null;
+    this.face = vx >= 0 ? -1 : 1;
+  }
+  knockout(dir) {
+    slowMo = Math.max(slowMo, 52);
+    freeze(12); shakeScreen(20);
+    impact(this.x, this.chestY(), 2.2, this.c.color, "K.O.!");
+    addFx({ t: "lines", x: this.x, y: this.chestY(), n: 16, len: 120, life: 22, color: this.c.color });
+    this.launch(dir * 15, 17);
+    this.hp = 0; this.koTimer = 54;
+  }
+
+  die() { // knockout total → cade, apoi reînvie
     if (this.opponent) this.endFight();
     this.opponent = null; this.attacker = false;
     this.state = "dead"; this.deadTimer = rand(200, 340); this.lie = 1; this.sleepPhase = null;
     this.sleepDir = Math.random() < 0.5 ? 1 : -1; this.weapon = null; this.stars = [];
+    this.hp = 0; this.hpShow = 120; this.combo = 0;
+    groundShock(this.x, 1);
     this.speak(pick(["Aaargh!", "M-ai... învins...", "Gata cu mine..."]), 70);
   }
-  startFight(other) {
-    this.state = "fight"; this.opponent = other; this.stateTimer = rand(300, 520);
+  // pornește o lovitură: întâi anticiparea (se încordează), impactul vine la ~45% din animație
+  swingAt(o) {
+    const sword = this.weapon === "sword";
+    // CIOCNIRE DE SĂBII: dacă amândoi taie în același timp, lamele se izbesc
+    if (sword && o.weapon === "sword" && o.attackAnim > 0 && Math.abs(o.x - this.x) < 110) {
+      const mx = (this.x + o.x) / 2, my = (this.chestY() + o.chestY()) / 2;
+      impact(mx, my, 1.5, "#ffffff", "CLING!");
+      spawnSparks(mx, my, 30, "#ffe9a8", 1.6);
+      this.knock -= this.face * 9; o.knock += this.face * 9;
+      this.stun = 20; o.stun = 20; this.combo = 0; o.combo = 0;
+      this.attackAnim = 0; o.attackAnim = 0; o.pendingHit = null;
+      this.punchTimer = rand(16, 30); o.punchTimer = rand(16, 30);
+      return;
+    }
+    const finisher = !sword && this.combo >= 2 && Math.random() < 0.6;
+    const m = sword ? SWORD_MOVE : (finisher ? pick(FINISHERS) : pick(MOVES));
+    this.attackType = m.id; this.attackAnim = m.dur; this.attackDur = m.dur;
+    this.pendingHit = { o, m, t: Math.max(2, Math.round(m.dur * 0.45)) };
+    this.knock += this.face * (finisher ? 4.5 : 2.2);           // se aruncă în lovitură
+    if (finisher || sword) {
+      addFx({ t: "slash", x: this.x + this.face * 30, y: this.chestY(), r: 42, a0: this.face > 0 ? -1.1 : 2.05, a1: this.face > 0 ? 1.1 : 4.25, life: 12, color: sword ? "#ffffff" : this.c.color });
+      this.speak(pick(["HAAA!", "Ia asta!", "Gata cu tine!"]), 30);
+    }
+    // apărătorul poate ridica garda exact la timp (parare)
+    if (o.stun <= 0 && !o.isPlayer && Math.random() < (finisher ? 0.16 : 0.26)) o.guard = Math.round(m.dur * 0.75);
+  }
+  resolveHit(o, m) {
+    if (!o || !o.canBeHit() || Math.abs(o.x - this.x) > m.reach + 44) { this.combo = 0; return; }
+    const landed = o.damage(m.dmg, this.x, { power: m.power, knock: m.knock, stun: m.stun, at: m.at, launch: m.launch, word: m.word, attacker: this });
+    if (!landed) { this.combo = 0; return; }
+    this.combo++; this.comboCd = 110;
+    if (this.combo >= 3) addFx({ t: "word", x: (this.x + o.x) / 2, y: this.headY() - 46, s: this.combo + "x COMBO", life: 40, color: this.c.color, size: 15 + Math.min(8, this.combo) });
+    if (m.launch) { shakeScreen(11); freeze(9); }
+  }
+  fireOrb(o, charged) {
+    const r = charged ? 15 : 9;
+    orbs.push({ x: this.x + this.face * 24, y: groundY - this.feetOffset() - 96, vx: this.face * (charged ? 7.5 : 6), vy: -1, foe: o, life: 150, color: this.c.color, r, trail: [], burst: null, dmg: charged ? 22 : 13, owner: this });
+    impact(this.x + this.face * 26, groundY - this.feetOffset() - 96, charged ? 0.7 : 0.4, this.c.color);
+    this.speak(pick(charged ? ["MAXIM!", "Puterea!", "Bum!"] : ["Hah!", "Energie!", "Ia asta!"]), 40);
+  }
+  fireBeam(o) {
+    const x0 = this.x + this.face * 26, y0 = groundY - this.feetOffset() - 96;
+    const x1 = o.x + this.face * 30, y1 = o.chestY();
+    addFx({ t: "beam", x: x0, y: y0, x2: x1, y2: y1, w: 20, life: 20, color: this.c.color });
+    impact(x1, y1, 1.8, this.c.color, "RAZĂ!");
+    o.damage(26, this.x, { power: 1.8, knock: 14, stun: 40, launch: [13, 9], attacker: this, unblockable: true });
+    shakeScreen(16); freeze(8);
+    this.knock -= this.face * 7;   // recul de tragere
+  }
+  startFight(other, keepHp) {
+    this.state = "fight"; this.opponent = other; this.stateTimer = rand(700, 1100);
     this.attacker = true; this.punchTimer = 34;
+    if (!keepHp) { this.hp = this.maxHp; this.hpGhost = this.maxHp; }
+    this.hpShow = 200; this.combo = 0;
+    if (other) { if (!keepHp) { other.hp = other.maxHp; other.hpGhost = other.maxHp; } other.hpShow = 200; other.combo = 0; }
     this.speak(pick(this.c.fightLines), 90);
   }
   endFight() {
-    if (this.opponent) { this.opponent.opponent = null; this.opponent.state = "walk"; this.opponent.stateTimer = rand(60, 160); }
-    this.opponent = null; this.state = "walk"; this.stateTimer = rand(60, 160);
+    const o = this.opponent;
+    if (o) { o.opponent = null; if (!o.isPlayer && o.state === "fight") { o.state = "walk"; o.stateTimer = rand(60, 160); } o.combo = 0; }
+    this.opponent = null; this.combo = 0;
+    if (!this.isPlayer && this.state === "fight") { this.state = "walk"; this.stateTimer = rand(60, 160); }
   }
 
   update(W) {
@@ -282,6 +566,24 @@ class Agent {
     if (this.waveTimer > 0) this.waveTimer--;
     if (this.greetCd > 0) this.greetCd--;
     this.stars.forEach(s => { s.ang += 0.2; s.r *= 0.96; });
+    // ---- luptă: temporizatoare & recul ----
+    if (this.hitFlash > 0) this.hitFlash--;
+    if (this.stun > 0) this.stun--;
+    if (this.guard > 0) this.guard--;
+    if (this.hpShow > 0) this.hpShow--;
+    if (this.comboCd > 0 && --this.comboCd <= 0) this.combo = 0;
+    this.hpGhost += (this.hp - this.hpGhost) * 0.08;                       // bara fantomă coboară lin
+    this.aura += ((this.state === "fight" ? 1 : 0) - this.aura) * 0.12;
+    if (this.koTimer > 0 && --this.koTimer <= 0 && this.state !== "dead") this.die();
+    if (this.pendingHit && --this.pendingHit.t <= 0) { const ph = this.pendingHit; this.pendingHit = null; this.resolveHit(ph.o, ph.m); }
+    if (this.ghosts) for (let i = this.ghosts.length - 1; i >= 0; i--) if ((this.ghosts[i].a -= 0.055) <= 0) this.ghosts.splice(i, 1);
+    if (Math.abs(this.knock) > 0.25) {                                     // knockback: alunecă înapoi, cu praf
+      const canSlide = this.state !== "thrown" && this.state !== "held" && this.state !== "dead";
+      if (canSlide) { this.x = clamp(this.x + this.knock, 40, W - 40); if (this.tz <= 0.5 && frame % 3 === 0) spawnDust(this.x, groundY, 1); }
+      this.knock *= 0.82;
+      // izbit de marginea ecranului = impact suplimentar
+      if (canSlide && (this.x <= 41 || this.x >= W - 41) && Math.abs(this.knock) > 3.4) { impact(this.x, this.chestY(), 1.1, this.c.color, "IZBIT!"); this.damage(6, this.x - Math.sign(this.knock) * 50, { power: 0.5, knock: 0, stun: 22 }); this.knock *= -0.35; }
+    } else this.knock = 0;
 
     // stări care ignoră restul
     if (this.state === "dead") { if (this.say) { if (--this.say.ttl <= 0) this.say = null; } if (--this.deadTimer <= 0) { this.state = "walk"; this.lie = 0; this.targetX = null; this.stateTimer = rand(60, 140); this.speak(pick(["Am înviat! 💀→😀", "M-am întors!", "Din nou în picioare!"]), 100); } return; }
@@ -541,34 +843,42 @@ class Agent {
     }
     else if (this.state === "fight") {
       const o = this.opponent;
-      if (!o) { this.state = "walk"; return; }
+      if (!o || !o.canBeHit()) { this.endFight(); return; }
       const dx = o.x - this.x, d = Math.abs(dx) || 1;
-      this.face = dx >= 0 ? 1 : -1;
-      const bow = this.weapon === "bow", ranged = bow || this._orbFight, wantD = bow ? 210 : (this._orbFight ? 160 : 60);
-      if (d > wantD + 8) { this.x += Math.sign(dx) * (this.speed + 0.5); this.walkPhase += 0.16; }
-      else if (d < wantD - 8 && !ranged) { // corp la corp: nu se suprapun
+      if (this.stun <= 0 && this.chargeT <= 0) this.face = dx >= 0 ? 1 : -1;
+      // plasă de siguranță: dacă niciunul nu e „la rând", bătaia s-ar bloca — repornește schimbul
+      if (!this.attacker && !o.attacker && this.stun <= 0 && this.chargeT <= 0 && !this.pendingHit) { this.attacker = true; this.punchTimer = rand(8, 20); }
+      const bow = this.weapon === "bow", ranged = bow || this._orbFight, wantD = bow ? 210 : (this._orbFight ? 175 : 52);
+      const rush = 2.5 + fightHeat * 2.2;                               // se reped unul la altul; cu cât e mai încinsă bătaia, cu atât mai tare
+      if (this.stun > 0) {
+        this.walkPhase += 0.04;                                         // amețit: doar se clatină
+      } else if (this.chargeT > 0) {                                    // ÎNCARCĂ energie (AvM): particule atrase spre pumn
+        this.chargeT--;
+        const hx = this.x + this.face * 26, hy = groundY - this.feetOffset() - 96;
+        if (frame % 2 === 0) { const a = rand(0, 6.28), r0 = rand(30, 62); spawnParticles(hx + Math.cos(a) * r0, hy + Math.sin(a) * r0, 1, { color: this.c.color, glow: 1, vx: -Math.cos(a) * r0 * 0.07, vy: -Math.sin(a) * r0 * 0.07, spMin: 0, spMax: 0.2, g: 0, rMin: 1.6, rMax: 3.4, lifeMin: 12, lifeMax: 16 }); }
+        if (this.chargeT === 0) { if (this._beamNext) { this._beamNext = false; this.fireBeam(o); } else this.fireOrb(o, true); }
+      } else if (d > wantD + 8) {
+        this.x += Math.sign(dx) * (this.speed + 0.5) * rush; this.walkPhase += 0.16 * rush;
+        if (frame % 5 === 0 && this.tz <= 0.5) spawnDust(this.x, groundY, 1);
+      } else if (d < wantD - 14 && !ranged) {                           // corp la corp: nu se suprapun
         const s = dx !== 0 ? Math.sign(dx) : (agents.indexOf(this) < agents.indexOf(o) ? 1 : -1);
-        this.x -= s * (this.speed + 0.5); this.walkPhase += 0.13;
-      }
-      else if (this.attacker && this.punchTimer-- <= 0) {
-        this.punchTimer = rand(ranged ? 42 : 30, ranged ? 74 : 50);
-        this.attackAnim = 16;
-        if (bow) { this.attackType = "bow"; arrows.push({ x: this.x + this.face * 20, y: groundY - 96, vx: this.face * 9, foe: o, life: 160 }); }
-        else if (this._orbFight) { // AvM: aruncă un orb de energie de culoarea lui
-          this.attackType = "orb";
-          orbs.push({ x: this.x + this.face * 22, y: groundY - 96, vx: this.face * 6, vy: -1, foe: o, life: 130, color: this.c.color, r: 9, trail: [], burst: null });
-          this.speak(pick(["Hah!", "Energie!", "Ia asta!", "Puterea!"]), 40);
+        this.x -= s * (this.speed + 0.5) * 1.6; this.walkPhase += 0.16;
+      } else if (this.attacker && this.punchTimer-- <= 0) {
+        this.punchTimer = rand(ranged ? 26 : 8, ranged ? 50 : 20);      // schimburi mult mai rapide decât înainte
+        if (bow) {
+          this.attackType = "bow"; this.attackAnim = 16; this.attackDur = 16;
+          arrows.push({ x: this.x + this.face * 20, y: groundY - this.feetOffset() - 96, vx: this.face * 11, foe: o, life: 160, owner: this });
+        } else if (this._orbFight) {                                    // orb încărcat sau, rar, o rază
+          this._beamNext = Math.random() < 0.22;
+          this.chargeT = this._beamNext ? 34 : 20;
+          this.attackType = "charge"; this.attackAnim = this.chargeT + 8; this.attackDur = this.attackAnim;
+          this.speak(this._beamNext ? "Se încarcă..." : pick(["Hmm!", "Acum!"]), 40);
+        } else {
+          this.swingAt(o);
         }
-        else {
-          this.attackType = this.weapon === "sword" ? "punch" : (Math.random() < 0.5 ? "punch" : "kick");
-          o.recoil = this.attackType === "kick" ? 18 : 14;
-          o.stars = [{ ang: 0, r: 22 }, { ang: 2, r: 22 }, { ang: 4, r: 22 }];
-          if (this.weapon === "sword" && o.state !== "dead" && Math.random() < 0.2) o.die(); // lovitură mortală de sabie
-          else if (!o.say) o.speak(pick(o.c.hitLines), 45);
-        }
-        this.attacker = false; o.attacker = true; o.punchTimer = rand(24, 40);
+        this.attacker = false; o.attacker = true; o.punchTimer = rand(6, 16);
       }
-      if (--this.stateTimer <= 0) this.endFight();
+      if (--this.stateTimer <= 0 && this.chargeT <= 0 && this.hp > this.maxHp * 0.4 && o.hp > o.maxHp * 0.4) this.endFight(); // sub 40% viață se luptă până la KO
     }
     else { // walk / idle
       if (this.startle > 0) {
@@ -677,7 +987,7 @@ class Agent {
     if (keys.has("a") || keys.has("arrowleft")) dir -= 1;
     if (keys.has("d") || keys.has("arrowright")) dir += 1;
     // DASH (Shift): impuls orizontal scurt și plat; în aer ai unul singur — se reîncarcă la sol sau pe perete
-    if (this.ghosts === undefined) { this.ghosts = []; this.dashT = 0; this.dashCd = 0; this.dashDir = this.face; this.wallT = 0; this.wallSide = 0; this.kickVx = 0; this._airDash = 1; }
+    if (this.ghosts === undefined) { this.ghosts = []; this.dashT = 0; this.dashCd = 0; this.dashDir = this.face; this.wallT = 0; this.wallSide = 0; this.kickVx = 0; this._airDash = 1; this.atkCd = 0; this.pCombo = 0; this.pComboCd = 0; this._dashHit = []; }
     if (this.dashCd > 0) this.dashCd--;
     const inAir = this.tz > 0.5 && !this.onPlat;
     if (this.wantDash) {
@@ -685,18 +995,45 @@ class Agent {
       if (this.dashT <= 0 && this.dashCd <= 0 && (!inAir || this._airDash > 0)) {
         if (inAir) this._airDash--;
         this.dashDir = dir || this.face; this.face = this.dashDir;
-        this.dashT = 12; this.dashCd = 30; this.wallT = 0; this.pzv = 0; this.kickVx = 0;
+        this.dashT = 12; this.dashCd = 30; this.wallT = 0; this.pzv = 0; this.kickVx = 0; this._dashHit = [];
         spawnDust(this.x - this.dashDir * 16, groundY - this.tz, 6);
       }
     }
+    // ATAC (E): combo de 3 — pumn, șut, apoi lovitura care-l trimite prin aer
+    if (this.atkCd > 0) this.atkCd--;
+    if (this.pComboCd > 0 && --this.pComboCd <= 0) this.pCombo = 0;
+    if (this.wantAttack) {
+      this.wantAttack = false;
+      if (this.atkCd <= 0 && this.stun <= 0) {
+        this.pCombo = (this.pCombo || 0) + 1;
+        const fin = this.pCombo >= 3;
+        const m = fin ? FINISHERS[1] : (this.pCombo === 2 ? MOVES[1] : MOVES[0]);
+        if (fin) this.pCombo = 0;
+        this.attackType = m.id; this.attackAnim = m.dur; this.attackDur = m.dur;
+        this.atkCd = fin ? 24 : 11; this.pComboCd = 70;
+        this.knock += this.face * (fin ? 5 : 2.5);
+        if (fin) addFx({ t: "slash", x: this.x + this.face * 30, y: this.chestY(), r: 44, a0: this.face > 0 ? -1.1 : 2.05, a1: this.face > 0 ? 1.1 : 4.25, life: 12, color: this.c.color });
+        const foe = agents.find(a => a !== this && !a.isPlayer && a.canBeHit() && Math.sign(a.x - this.x) === this.face && Math.abs(a.x - this.x) < m.reach + 22 && Math.abs(a.feetOffset() - this.tz) < 96);
+        this.pendingHit = foe ? { o: foe, m, t: Math.max(2, Math.round(m.dur * 0.4)) } : null;
+        if (!foe) spawnParticles(this.x + this.face * 40, this.chestY(), 3, { color: "#ffffff", spMin: 1, spMax: 3, lifeMin: 6, lifeMax: 12, rMin: 1, rMax: 2 }); // lovitură în gol
+      }
+    }
+    if (this.hp < this.maxHp && this.hpShow <= 0 && this.stun <= 0) this.hp = Math.min(this.maxHp, this.hp + 0.16); // îți revii singur
     if (this.dashT > 0) {
       this.dashT--;
       this.x += this.dashDir * (8 + 11 * (this.dashT / 12));   // pornire explozivă, se stinge lin
       this.walkPhase += 0.1;
       this.ghosts.push({ x: this.x, tz: this.tz, f: this.dashDir, a: 0.55 });
+      // ȘARJĂ: dash-ul prin cineva îl mătură din drum
+      for (const a of agents) {
+        if (a === this || a.isPlayer || !a.canBeHit() || this._dashHit.indexOf(a) >= 0) continue;
+        if (Math.abs(a.x - this.x) < 36 && Math.abs(a.feetOffset() - this.tz) < 84) {
+          this._dashHit.push(a);
+          a.damage(13, this.x, { power: 1.4, knock: 15, stun: 28, attacker: this, word: "ȘARJĂ!" });
+        }
+      }
     } else if (dir) { this.face = dir; this.x += dir * this.speed * 2.4 * sprint; this.walkPhase += 0.16 * sprint; if (sprint > 1 && this.tz <= 0 && frame % 5 === 0) spawnDust(this.x, groundY, 2); }
     if (Math.abs(this.kickVx || 0) > 0.2) { this.x += this.kickVx; this.kickVx *= 0.88; } else this.kickVx = 0; // recul de la wall-jump
-    for (let i = this.ghosts.length - 1; i >= 0; i--) if ((this.ghosts[i].a -= 0.055) <= 0) this.ghosts.splice(i, 1);
     // PARKOUR: fizică verticală cu platforme = desenele din fundal + structurile (case/turnuri/copaci)
     const platOf = (ref) => {
       if (!ref) return null;
@@ -814,6 +1151,20 @@ class Agent {
       } else {
         this.squash = 1.4; spawnDust(this.x, groundY, 8);
         this.tangle = 0; this.tangVel = 0;
+        // izbit de pământ după o lansare = crater + zguduit; apoi se ridică și continuă bătaia
+        if (this._resumeFoe) {
+          groundShock(this.x, 0.85); shakeScreen(7); spawnSparks(this.x, groundY, 10, this.c.color, 0.9);
+          const foe = this._resumeFoe; this._resumeFoe = null;
+          if (foe.canBeHit() && !this.isPlayer && this.hp > 0) {
+            this.state = "fight"; this.opponent = foe; foe.opponent = this;
+            this.stateTimer = rand(300, 560); this.stun = 26; this.attacker = true; this.punchTimer = rand(30, 46);
+            if (foe.state !== "fight") { foe.state = "fight"; foe.stateTimer = rand(300, 560); foe.attacker = true; foe.punchTimer = rand(16, 30); }
+            this.speak(pick(["Încă nu s-a terminat!", "Mă întorc!", "Grr!"]), 55);
+            return;
+          }
+          if (this.isPlayer) { this.state = "run"; return; }
+          if (foe.opponent === this) foe.opponent = null;
+        }
         this.enterScared(); // se sperie și fuge de tine ~3s
       }
     }
@@ -824,6 +1175,11 @@ class Agent {
     if (this.away) return;
     const c = this.c;
 
+    // dâră de lovitură: în cadrele de impact rămâne o urmă a corpului (ca la Alan Becker)
+    if (this.attackAnim > 0 && this.attackDur && this.attackAnim < this.attackDur * 0.62 && frame % 2 === 0) {
+      (this.ghosts = this.ghosts || []).push({ x: this.x, tz: this.feetOffset(), f: this.face, a: 0.32 });
+      if (this.ghosts.length > 6) this.ghosts.shift();
+    }
     // urme de dash (afterimages) — siluetă simplă în pozițiile prin care tocmai a trecut
     if (this.ghosts && this.ghosts.length) {
       ctx.save(); ctx.strokeStyle = c.color; ctx.lineWidth = 3.5; ctx.lineCap = "round"; ctx.lineJoin = "round";
@@ -869,11 +1225,21 @@ class Agent {
     }
     ctx.scale(scaleX, scaleY);
 
-    ctx.strokeStyle = c.color; ctx.fillStyle = c.color;
+    // AURA de luptă: strălucire pulsantă în culoarea lui, cu atât mai tare cu cât e mai încinsă bătaia
+    if (this.aura > 0.03) {
+      const pulse = 0.7 + Math.sin(frame * 0.22) * 0.3, R = (78 + fightHeat * 34) * pulse;
+      ctx.save(); ctx.globalAlpha = 0.32 * this.aura * (0.55 + fightHeat * 0.75);
+      ctx.drawImage(auraSprite(c.color), -R, -70 - R, R * 2, R * 2);
+      ctx.restore();
+    }
+    const col = this.hitFlash > 0 && this.hitFlash % 2 === 0 ? "#ffffff" : c.color;  // clipește alb când încasează
+    ctx.strokeStyle = col; ctx.fillStyle = col;
+    if (this.hitFlash > 0) { ctx.shadowColor = "#ffffff"; ctx.shadowBlur = 12; }
     ctx.lineWidth = 4.5; ctx.lineCap = "round"; ctx.lineJoin = "round"; // linii mai subțiri (nu prea groase)
 
     skelRec = { pts: [], segs: [], circles: [], last: null };   // înregistrează geometria reală
     this.drawSkeleton(ctx);
+    ctx.shadowBlur = 0;
     const rec = skelRec; skelRec = null;
     if (rec.pts.length) {
       let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
@@ -918,7 +1284,12 @@ class Agent {
     const hipY = HIP_Y + bodyBob;
     const shX = lean + sway * 0.4, shY = SHOULDER_Y + bodyBob, asY = shY + 4;                // torsul urmează 40% (efect de bici)
     const headR = c.headR, headX = lean * 1.2 + sway, headY = shY - NECK - headR;            // capul rămâne în urmă cel mai mult
-    const striking = st === "fight" && this.attackAnim > 0;
+    const striking = this.attackAnim > 0 && (st === "fight" || this.isPlayer);
+    // faza loviturii: 0 = se încordează (anticipare), 1 = impact, 2 = revenire
+    const sw = striking ? 1 - this.attackAnim / (this.attackDur || 16) : 0;
+    const swing = sw < 0.35 ? -(0.35 - sw) / 0.35 : Math.min(1, (sw - 0.35) / 0.3); // -1 → 1
+    const blocking = this.guard > 0;
+    const stunned = this.stun > 6 && !striking;
     const HANG = 32;
 
     // ===== PICIOARE =====
@@ -939,8 +1310,24 @@ class Agent {
     } else if (this.jumping) {
       for (const side of [-1, 1]) { const hx = side * 3; ctx.beginPath(); ctx.moveTo(hx, hipY); ctx.lineTo(hx + side * 12, hipY + 14); ctx.lineTo(hx + side * 4, hipY - 2); ctx.stroke(); }
     } else if (striking && this.attackType === "kick") {
+      const k = 18 + swing * 34;
       this.legIK(ctx, -4, hipY, -8, 0, -1);
-      ctx.beginPath(); ctx.moveTo(4, hipY); ctx.lineTo(26, hipY + 2); ctx.lineTo(52, hipY - 8); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(4, hipY); ctx.lineTo(k * 0.5, hipY + 2); ctx.lineTo(k, hipY - 8 - swing * 14); ctx.stroke();
+    } else if (striking && this.attackType === "sweep") {   // măturare: piciorul rade pământul într-un arc
+      const k = 10 + swing * 62;
+      this.legIK(ctx, -4, hipY, -14, 0, -1);
+      ctx.beginPath(); ctx.moveTo(4, hipY); ctx.lineTo(k * 0.55, hipY + 26); ctx.lineTo(k, hipY + 44); ctx.stroke();
+    } else if (striking && this.attackType === "upper") {   // upercut: se lasă pe picioare, apoi împinge din ele
+      const c2 = 1 - Math.abs(swing);
+      this.legIK(ctx, -3, hipY, -12 - c2 * 4, -c2 * 8, -1);
+      this.legIK(ctx, 3, hipY, 14 + c2 * 4, -c2 * 8, -1);
+    } else if (blocking) {                                   // gardă: picioare depărtate, ancorat
+      this.legIK(ctx, -3, hipY, -17, 0, -1);
+      this.legIK(ctx, 3, hipY, 15, 0, -1);
+    } else if (stunned) {                                    // amețit: se clatină pe picioare
+      const w = Math.sin(this.bob * 4) * 7;
+      this.legIK(ctx, -3, hipY, -12 + w, 0, -1);
+      this.legIK(ctx, 3, hipY, 13 + w, 0, -1);
     } else if (hanging) {
       const sway = Math.sin(this.bob * 2) * 6;
       this.legIK(ctx, -3, hipY, -6 + sway, hipY + 48, -1);
@@ -990,10 +1377,26 @@ class Agent {
     } else if (painting) {
       const w = Math.sin(this.bob * 6) * 5; // mâna se mișcă (desenează)
       seg(16 + w, -18, 28 + w, -30 + w); seg(-10, 14, -14, 26);
-    } else if (striking && this.attackType === "punch") {
-      seg(22, -2, 42, -6); seg(-10, 12, -6, -2);
+    } else if (striking && (this.attackType === "punch" || this.attackType === "slash")) {
+      const r = 10 + swing * 36;                       // se trage înapoi, apoi țâșnește
+      seg(r * 0.55, -2, r, -6 - swing * 4); seg(-10, 12, -6, -2);
+    } else if (striking && this.attackType === "elbow") {
+      const r = 6 + swing * 26;
+      seg(r * 0.4, -12 - swing * 6, r * 0.1, -20 - swing * 10); seg(-12, 10, -8, 24);
+    } else if (striking && this.attackType === "upper") {
+      const u = swing * 46;                            // pumnul urcă vertical
+      seg(10, 16 - u * 0.7, 14, 8 - u); seg(-12, 10, -16, 22);
+    } else if (striking && this.attackType === "charge") {
+      const g2 = 1 - this.chargeT / Math.max(1, this.attackDur - 8);
+      seg(16, 4 - g2 * 6, 26 + g2 * 6, -2 - g2 * 8); seg(10, 10, 20 + g2 * 4, 4); // ambele mâini strâng energia
+    } else if (blocking) {
+      seg(12, -10, 6, -26); seg(10, 6, 4, -10);        // ambele brațe în față = gardă
+    } else if (stunned) {
+      const w = Math.sin(this.bob * 4) * 6;
+      seg(-14 + w, 14, -20 + w, 26); seg(14 + w, 12, 20 + w, 26); // brațe moi, atârnate
     } else if (st === "fight") {
-      seg(12, 8, 20, -6); seg(-10, 10, -4, -4);
+      const gd = Math.sin(this.bob * 2) * 2;           // gardă vie: pumnii sus, se leagănă
+      seg(14, -6 + gd, 20, -18 + gd); seg(-8, 4 - gd, -2, -12 - gd);
     } else if (st === "sleep" && this.sleepPhase !== "goto") {
       seg(-12, 12, -18, 24); seg(12, 12, 18, 24);
     } else {
@@ -1222,7 +1625,7 @@ let settingsWin = null;     // fereastra Setări
 let notepadWin = null;      // fereastra notepad
 let paintWin = null;        // fereastra MS Paint
 let minecraftWin = null;    // modul Minecraft 2D
-const PAINT_COLORS = ["#ffffff", "#E63329", "#FF8C1A", "#F5C518", "#46B84B", "#3B7DD8", "#9b4dff", "#111114"];
+const PAINT_COLORS = ["#ffffff", "#CC0000", "#FF6600", "#FFCC00", "#66CC00", "#33CCFF", "#980098", "#111114"];
 const VIDEOS = [
   { t: "Cea mai tare cascadorie 😱", v: "stunt" },
   { t: "10 lucruri pe care nu le știai", v: "facts" },
@@ -1706,8 +2109,13 @@ function drawWeapons() {
 function updateArrows() {
   for (let i = arrows.length - 1; i >= 0; i--) {
     const a = arrows[i]; a.x += a.vx; a.life--;
+    a.trail = a.trail || []; a.trail.push(a.x); if (a.trail.length > 5) a.trail.shift();
     const o = a.foe;
-    if (o && !o.away && o.state !== "held" && o.state !== "dead" && Math.abs(a.x - o.x) < 22) { o.recoil = 14; o.stars = [{ ang: 0, r: 22 }, { ang: 2, r: 22 }, { ang: 4, r: 22 }]; if (Math.random() < 0.2) o.die(); else if (!o.say) o.speak(pick(o.c.hitLines), 45); arrows.splice(i, 1); continue; }
+    if (o && o.canBeHit && o.canBeHit() && Math.abs(a.x - o.x) < 22) {
+      o.damage(17, a.x - a.vx * 10, { power: 1.25, knock: 9, stun: 26, attacker: a.owner, word: "ȚAC!" });
+      spawnSparks(a.x, a.y, 12, "#ffe9b0", 1.1);
+      arrows.splice(i, 1); continue;
+    }
     if (a.life <= 0 || a.x < -30 || a.x > W + 30) arrows.splice(i, 1);
   }
 }
@@ -1718,17 +2126,33 @@ function drawArrows() {
 }
 // orbi de energie (stil Animator vs. Animation): zboară cu urmărire ușoară, dâră + explozie la impact
 function updateOrbs() {
+  // ciocnire orb-cu-orb în aer (AvM): se anulează într-o explozie mare la mijloc
+  for (let i = orbs.length - 1; i >= 0; i--) {
+    const a = orbs[i]; if (a.burst != null) continue;
+    for (let j = i - 1; j >= 0; j--) {
+      const b = orbs[j]; if (b.burst != null || b.owner === a.owner) continue;
+      if (Math.hypot(a.x - b.x, a.y - b.y) < a.r + b.r + 8) {
+        const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+        impact(mx, my, 1.7, "#ffffff", "CIOC!");
+        spawnSparks(mx, my, 26, a.color, 1.5); spawnSparks(mx, my, 26, b.color, 1.5);
+        a.burst = frame; a.life = 16; a.trail = []; b.burst = frame; b.life = 16; b.trail = [];
+        break;
+      }
+    }
+  }
   for (let i = orbs.length - 1; i >= 0; i--) {
     const o = orbs[i];
     if (o.burst != null) { if (--o.life <= 0) orbs.splice(i, 1); continue; }
-    const f = o.foe, ty = groundY - 96;
-    if (f && !f.away) { o.vx += Math.sign(f.x - o.x) * 0.35; o.vx = clamp(o.vx, -11, 11); o.vy += ((ty - o.y) * 0.03 - o.vy) * 0.25; }
+    const f = o.foe, ty = f && f.canBeHit ? f.chestY() + 12 : groundY - 96;
+    if (f && !f.away) { o.vx += Math.sign(f.x - o.x) * 0.42; o.vx = clamp(o.vx, -12, 12); o.vy += ((ty - o.y) * 0.03 - o.vy) * 0.25; }
     o.x += o.vx; o.y += o.vy; o.life--;
-    o.trail.push({ x: o.x, y: o.y }); if (o.trail.length > 8) o.trail.shift();
-    if (f && !f.away && f.state !== "held" && f.state !== "dead" && Math.abs(o.x - f.x) < 24 && Math.abs(o.y - ty) < 42) {
-      f.recoil = 20; f.stars = [{ ang: 0, r: 24 }, { ang: 2, r: 24 }, { ang: 4, r: 24 }]; f.squash = 1;
-      if (f.state !== "dead" && Math.random() < 0.3) f.die(); else if (!f.say) f.speak(pick(f.c.hitLines), 45);
-      o.burst = frame; o.life = 15; o.trail = [];
+    o.trail.push({ x: o.x, y: o.y }); if (o.trail.length > 10) o.trail.shift();
+    if (frame % 2 === 0) spawnParticles(o.x, o.y, 1, { color: o.color, glow: 1, spMin: 0.2, spMax: 1.1, g: 0.02, rMin: 1, rMax: 2.4, lifeMin: 8, lifeMax: 16 });
+    if (f && f.canBeHit && f.canBeHit() && Math.abs(o.x - f.x) < 24 && Math.abs(o.y - ty) < 46) {
+      const big = o.r > 12;
+      f.damage(o.dmg || 13, o.x - o.vx * 6, { power: big ? 1.7 : 1.1, knock: big ? 13 : 8, stun: big ? 32 : 20, attacker: o.owner, launch: big ? [11, 9] : null, word: big ? "PUF!" : null });
+      spawnSparks(o.x, o.y, big ? 24 : 14, o.color, big ? 1.6 : 1.1);
+      o.burst = frame; o.life = 16; o.trail = [];
       continue;
     }
     if (o.life <= 0 || o.x < -40 || o.x > W + 40) orbs.splice(i, 1);
@@ -2341,7 +2765,7 @@ window.triggerExpedition = function () {
 function spawnPlayer() {
   if (player) { // vechiul devine AI — primește o culoare (doar cel controlat rămâne gri)
     player.isPlayer = false; player.state = "walk"; player.targetX = null;
-    player.c = { ...player.c, color: pick(["#FF8C1A", "#E63329", "#46B84B", "#3B7DD8", "#F5C518", "#9b4dff", "#E8A317"]) };
+    player.c = { ...player.c, color: pick(["#FF6600", "#CC0000", "#66CC00", "#33CCFF", "#FFCC00", "#980098", "#CC6600"]) };
   }
   playerCount++;
   const c = { id: "player" + playerCount, name: "Tu", color: "#aab0be", hollowHead: false, headR: 20, persona: "jucătorul controlat de tastatură (A/D/săgeți + Space).", chatter: ["Sunt tu!", "Hai!", "Wooo!"], hitLines: ["Au!", "Hei!"], fightLines: ["Ia asta!"] };
@@ -2398,12 +2822,26 @@ window.addEventListener("keydown", (e) => {
   if (k === "g") { fxLevel = fxLevel < 0.05 ? 0.1 : (fxLevel < 0.2 ? 0.35 : (fxLevel < 0.6 ? 0.7 : 0)); return; } // intensitate shader WebGL
   if (k === " " || k === "spacebar") { if (player && !e.repeat) player.wantJump = true; e.preventDefault(); return; } // Space = salt; în aer = double jump; pe perete = wall-jump
   if (k === "shift") { if (player && !e.repeat) player.wantDash = true; e.preventDefault(); return; }                 // Shift = dash
+  if (k === "e") { if (player) player.wantAttack = true; e.preventDefault(); return; }                                // E = lovește (combo de 3)
   sprintHeld = e.ctrlKey; // Ctrl ținut = fugă (sprint)
   if (k === "control") { e.preventDefault(); return; }
   if (k === "a" || k === "d" || k === "arrowleft" || k === "arrowright") { keys.add(k); if (k.startsWith("arrow") || e.ctrlKey) e.preventDefault(); } // preventDefault la Ctrl+A/D ca să nu declanșeze scurtături de browser
 });
 window.addEventListener("keyup", (e) => { keys.delete(e.key.toLowerCase()); sprintHeld = e.ctrlKey; });
 window.addEventListener("blur", () => { keys.clear(); sprintHeld = false; }); // pierde focusul → nu rămâne blocat pe sprint/mers
+// bară de viață deasupra capului — apare doar când se bat / tocmai au încasat
+function drawHpBar(a) {
+  if (a.away || a.hpShow <= 0 || a.state === "held") return;
+  const alpha = Math.min(1, a.hpShow / 40);
+  const w = 54, h = 6, x = a.x - w / 2, y = a.headY() - a.c.headR - 18;
+  ctx.save(); ctx.globalAlpha = alpha;
+  ctx.fillStyle = "rgba(0,0,0,0.55)"; ctx.fillRect(x - 1.5, y - 1.5, w + 3, h + 3);
+  ctx.fillStyle = "rgba(255,255,255,0.28)"; ctx.fillRect(x, y, w, h);
+  ctx.fillStyle = "rgba(255,90,60,0.85)"; ctx.fillRect(x, y, w * clamp(a.hpGhost / a.maxHp, 0, 1), h); // urma daunelor
+  ctx.fillStyle = a.c.color; ctx.fillRect(x, y, w * clamp(a.hp / a.maxHp, 0, 1), h);
+  if (a.combo >= 2) { ctx.fillStyle = "#fff"; ctx.font = "bold 11px 'Segoe UI',sans-serif"; ctx.textAlign = "center"; ctx.fillText("x" + a.combo, a.x + w / 2 + 14, y + h); }
+  ctx.restore();
+}
 function drawHitboxes() {
   ctx.save();
   ctx.strokeStyle = "#ffffff"; ctx.lineWidth = 1.5; ctx.globalAlpha = 0.85;
@@ -2553,7 +2991,7 @@ function drawNotepadIcon(cx, cy, s) {
 
 function drawPaintIcon(cx, cy, s) {
   iconBg(cx, cy, s, "#f2ede2");
-  const dots = [["#E63329", -0.19, -0.17], ["#F5C518", 0.17, -0.19], ["#3B7DD8", -0.21, 0.11], ["#46B84B", 0.13, 0.13]];
+  const dots = [["#CC0000", -0.19, -0.17], ["#FFCC00", 0.17, -0.19], ["#33CCFF", -0.21, 0.11], ["#66CC00", 0.13, 0.13]];
   for (const [c, dx, dy] of dots) { ctx.fillStyle = c; ctx.beginPath(); ctx.arc(cx + dx * s, cy + dy * s, s * 0.09, 0, Math.PI * 2); ctx.fill(); }
   // pensulă
   ctx.strokeStyle = "#7a5a3a"; ctx.lineWidth = Math.max(2, s * 0.05); ctx.lineCap = "round";
@@ -2617,14 +3055,25 @@ function drawStructure(s) {
   }
 }
 
-function drawParticles() {
-  ctx.save();
-  ctx.fillStyle = "rgba(200,205,230,0.5)";
+function drawParticles(step) {
+  ctx.save(); ctx.lineCap = "round";
   for (let i = particles.length - 1; i >= 0; i--) {
     const p = particles[i];
-    p.x += p.vx; p.y += p.vy; p.vy += 0.12; p.life--;
-    ctx.globalAlpha = Math.max(0, p.life / 30) * 0.5;
-    ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2); ctx.fill();
+    if (step) { p.x += p.vx; p.y += p.vy; p.vy += (p.g === undefined ? 0.12 : p.g); if (p.drag !== undefined && p.drag !== 1) { p.vx *= p.drag; p.vy *= p.drag; } p.life--; }
+    const a = Math.max(0, Math.min(1, p.life / 26));
+    if (p.color) {
+      // strălucirea se face prin blending aditiv, nu prin shadowBlur (de zeci de ori mai ieftin)
+      ctx.globalCompositeOperation = p.glow ? "lighter" : "source-over";
+      ctx.globalAlpha = a;
+      if (p.streak) { // scânteie cu dâră: linia arată direcția de zbor
+        ctx.strokeStyle = p.color; ctx.lineWidth = p.r * 1.5;
+        ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(p.x - p.vx * 1.9, p.y - p.vy * 1.9); ctx.stroke();
+      } else { ctx.fillStyle = p.color; ctx.beginPath(); ctx.arc(p.x, p.y, p.r * a, 0, Math.PI * 2); ctx.fill(); }
+      ctx.globalCompositeOperation = "source-over";
+    } else {
+      ctx.globalAlpha = a * 0.5; ctx.fillStyle = "rgba(200,205,230,1)";
+      ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2); ctx.fill();
+    }
     if (p.life <= 0) particles.splice(i, 1);
   }
   ctx.restore();
@@ -2766,7 +3215,17 @@ function SKY_moonShade() { const t = (dayClock % DAY_LEN) / DAY_LEN; let a = SKY
 function loop() {
   frame++;
   dayClock++;
+  // ---- ritmul cadrului: freeze-frame la impact, slow-motion la KO ----
+  let step = true;
+  if (hitStop > 0) { hitStop--; step = false; }                 // impactul „îngheață" imaginea o clipă
+  else if (slowMo > 0) { slowMo--; if (frame % 3 !== 0) step = false; } // KO = totul la o treime din viteză
+  if (step) updateFx();
+  // ---- zgâlțâitul camerei (cu supra-scalare, ca să nu apară margini goale) ----
+  if (shakeMag > 0.25) { shakeX = rand(-shakeMag, shakeMag); shakeY = rand(-shakeMag, shakeMag) * 0.75; if (step) shakeMag *= 0.86; }
+  else { shakeMag = 0; shakeX = 0; shakeY = 0; }
   ctx.clearRect(0, 0, W, H);
+  ctx.save();
+  if (shakeMag) { const s = 1 + Math.min(0.06, shakeMag / 220); ctx.translate(W / 2 + shakeX, H / 2 + shakeY); ctx.scale(s, s); ctx.translate(-W / 2, -H / 2); }
   drawSky();
   drawTaskbar();
   drawWallpaper();
@@ -2774,25 +3233,27 @@ function loop() {
   structures.forEach(drawStructure);
   drawWeapons(); // arme pe jos (de luat)
 
-  if (adventureCd-- <= 0) { adventureCd = rand(3600, 9000); if (autoAdventure) startAdventure(); }
-  for (let i = _pending.length - 1; i >= 0; i--) {
-    const p = _pending[i];
-    if (--p.t <= 0) { if (!p.a.away) { p.a.state = "leaving"; p.a.exitX = p.exitX; p.a.adventure = true; if (p.a.opponent) p.a.endFight(); } _pending.splice(i, 1); }
+  if (step) {
+    if (adventureCd-- <= 0) { adventureCd = rand(3600, 9000); if (autoAdventure) startAdventure(); }
+    for (let i = _pending.length - 1; i >= 0; i--) {
+      const p = _pending[i];
+      if (--p.t <= 0) { if (!p.a.away) { p.a.state = "leaving"; p.a.exitX = p.exitX; p.a.adventure = true; if (p.a.opponent) p.a.endFight(); } _pending.splice(i, 1); }
+    }
+
+    // focuri stinse → dispar după 5s
+    for (let i = structures.length - 1; i >= 0; i--) { const s = structures[i]; if (s.out && --s.outTimer <= 0) structures.splice(i, 1); }
+
+    // videoul se termină → Chrome se închide singur; ei deschid Chrome singuri (rar)
+    if (browserWin && frame - browserWin.t0 >= browserWin.dur) closeChrome();
+    if (!browserWin) { if (--chromeAutoCd <= 0) { chromeAutoCd = rand(4200, 9000); if (agents.filter(a => a.state === "walk" || a.state === "idle").length >= 2) openChrome(true); } }
+
+    maybeStartFight();
+    agents.forEach(a => a.update(W));
+    updateArrows();
+    updateOrbs();
+    updateMinecraft();
   }
-
-  // focuri stinse → dispar după 5s
-  for (let i = structures.length - 1; i >= 0; i--) { const s = structures[i]; if (s.out && --s.outTimer <= 0) structures.splice(i, 1); }
-
-  // videoul se termină → Chrome se închide singur; ei deschid Chrome singuri (rar)
-  if (browserWin && frame - browserWin.t0 >= browserWin.dur) closeChrome();
-  if (!browserWin) { if (--chromeAutoCd <= 0) { chromeAutoCd = rand(4200, 9000); if (agents.filter(a => a.state === "walk" || a.state === "idle").length >= 2) openChrome(true); } }
-
-  maybeStartFight();
-  agents.forEach(a => a.update(W));
-  updateArrows();
-  updateOrbs();
-  updateMinecraft();
-  drawParticles();
+  drawParticles(step);
   drawGroundTexts();
   drawBrowser();
   drawStopwatch();
@@ -2807,7 +3268,11 @@ function loop() {
   drawOrbs();   // orbi de energie (AvM)
   drawMinecraft(); // acoperă tot când e deschis
   agents.forEach(a => { if (onMc(a)) a.draw(ctx); }); // cei care stau PE Minecraft — peste el
+  drawFxLayer();     // inele de șoc, fulgere, linii de viteză, onomatopee — peste tot
+  agents.forEach(drawHpBar); // barele de viață ale celor care se bat
   if (showHitboxes) drawHitboxes();
+  ctx.restore();     // gata zgâlțâitul
+  drawHeatOverlay(); // vignetă care se aprinde când bătaia e în toi (nezgâlțâită)
   presentGL(); // compune cadrul pe GPU (WebGL) — sau nimic dacă e 2D pur
   requestAnimationFrame(loop);
 }

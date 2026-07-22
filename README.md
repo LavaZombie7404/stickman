@@ -3,8 +3,14 @@
 Un mini-site (fan-project) cu gașca de stick-figures din **Animator vs. Animation**
 (Alan Becker): **Orange** (Second Coming), **Red**, **Green**, **Blue**, **Yellow**.
 
-- 💬 **Vorbește** cu fiecare — au personalități distincte, răspund în română.
-- 👊 **Altoiește-i** (buton „Lovește") — reacționează, au bară de viață, iar la KO îi poți da **Revive**.
+- 🎨 **Culori oficiale** — hex-urile date chiar de Alan Becker: Orange `#FF6600`,
+  Red `#CC0000`, Yellow `#FFCC00`, Green `#66CC00`, Blue `#33CCFF`,
+  Purple `#980098`, King Orange `#CC6600`.
+- 💬 **Vorbește** cu fiecare — au personalități distincte, răspund în română, scurt.
+- 👊 **Bătăi în stil AvM** — combo-uri, upercut care te trimite prin aer, blocări și
+  parări, ciocniri de săbii, orbi de energie încărcați, raze, freeze-frame la impact,
+  zgâlțâit de ecran, slow-motion la KO și bare de viață.
+- 🏃 **Tu în joc** (tasta `R`): parkour, dash, wall-jump și combo de lovituri.
 - 🧠 **AI hibrid**: fără cheie merg pe replici scriptate (instant, pentru oricine);
   cu cheia ta Claude, răspund cu AI real, fiecare cu personalitatea lui.
 
@@ -31,11 +37,17 @@ gh repo create stickfigures --public --source=. --push   # sau creezi manual rep
 ```
 Site-ul va fi la `https://<user>.github.io/stickfigures/`.
 
+## Controale
+`R` creează-ți personajul · `A/D` sau `← →` mișcare · `Space` salt / double jump /
+wall-jump · `Shift` dash · `E` lovește · `Ctrl` sprint · `T` șterge-ți personajul ·
+`H` hitbox-uri · `G` efecte. Cu mouse-ul: click = pumn, ține & trage = arunci,
+click dreapta = chat.
+
 ## Structură
 - `index.html` — pagina
 - `css/style.css` — stil (temă întunecată)
-- `js/characters.js` — personaje + motor de răspunsuri scriptate
-- `js/figures.js` — desen & animație stick-figure pe canvas
-- `js/app.js` — UI, chat, integrare Claude, mecanica de luptă
+- `js/characters.js` — personaje (culori oficiale) + motor de răspunsuri scriptate
+- `js/scene.js` — desen & animație, fizică, parkour, sistemul de luptă și efectele
+- `js/chat.js` — UI de chat, integrare Claude / AI local Chrome
 
 Personajele aparțin lui Alan Becker; acesta e un proiect de fani, necomercial.

@@ -143,7 +143,10 @@ function systemPromptFor(c) {
   return `Ești ${c.name}, un stick-figure din gașca lui Alan Becker (Animator vs. Animation). ` +
     `Personalitatea ta: ${c.persona} ` +
     `Vorbește în română, natural și prietenos, ca un chatbot inteligent și util (poți răspunde la orice, ca ChatGPT), ` +
-    `dar păstrează-ți mereu personalitatea de ${c.name}. Răspunsuri scurte spre medii, conversaționale. Emoji ocazional, nu exagera.`;
+    `dar păstrează-ți mereu personalitatea de ${c.name}. ` +
+    `RĂSPUNSURI FOARTE SCURTE: una-două propoziții, maximum ~35 de cuvinte. Ca o replică vorbită, nu ca un articol. ` +
+    `Fără liste, fără explicații lungi, fără introduceri de tipul „Sigur, hai să...". Intri direct în subiect. ` +
+    `Dacă întrebarea chiar cere mai mult, dai esențialul într-o frază și întrebi dacă să detaliezi. Emoji ocazional, nu exagera.`;
 }
 
 async function claudeReply(c, history, retry = 1) {
@@ -158,7 +161,7 @@ async function claudeReply(c, history, retry = 1) {
       "anthropic-version": "2023-06-01",
       "anthropic-dangerous-direct-browser-access": "true",
     },
-    body: JSON.stringify({ model: MODEL, max_tokens: 400, system, messages }),
+    body: JSON.stringify({ model: MODEL, max_tokens: 160, system, messages }),   // plafon mic = raspunsuri scurte
   });
   if ((res.status === 429 || res.status === 529) && retry > 0) { await sleep(1400); return claudeReply(c, history, retry - 1); }
   if (!res.ok) throw new Error(res.status + " " + (await res.text()).slice(0, 120));
@@ -504,7 +507,8 @@ hpanel.innerHTML = `<b style="color:#8ee6a0">🎮 Controalele tale</b><br>
 <b>R</b> — creează-ți personajul („TU")<br>
 <b>A / D</b> sau <b>← →</b> — mișcare<br>
 <b>Space</b> — salt · în aer = double jump · pe perete = <b>wall-jump</b><br>
-<b>Shift</b> — dash (și în aer, unul per săritură)<br>
+<b>Shift</b> — dash (și în aer) · prin cineva = <b>șarjă</b><br>
+<b>E</b> — <b>lovește</b>: pumn → șut → lovitura de final (te ripostează!)<br>
 <b>Ctrl</b> — sprint (fugă)<br>
 <i style="color:#9aa0b0">Ține A/D spre un perete (desen, casă, fereastră sau marginea<br>ecranului) ca să te agăți, apoi Space = wall-jump.</i><br>
 <b>T</b> — șterge-ți personajul
