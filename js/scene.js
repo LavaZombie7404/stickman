@@ -47,8 +47,11 @@ let slowMo = 0;                             // cadre de slow-motion (KO-uri, fin
 let fightHeat = 0;                          // cât de aprinsă e bătaia acum (0..1) — urcă la fiecare lovitură
 const fx = [];                              // efecte de ecran: inele, fulgere, linii, texte
 
-function shakeScreen(m) { shakeMag = Math.min(30, Math.max(shakeMag, m)); }
-function freeze(f) { hitStop = Math.max(hitStop, f); }
+// cât de tare zgâlțâie și îngheață ecranul un impact: 1 = maxim (cum era înainte).
+// Ținut jos ca lupta să fie de privit, nu obositoare.
+const FIGHT_FX = 0.45;
+function shakeScreen(m) { shakeMag = Math.min(13, Math.max(shakeMag, m * FIGHT_FX)); }
+function freeze(f) { hitStop = Math.max(hitStop, Math.round(f * FIGHT_FX)); }
 function addFx(o) { o.max = o.life; fx.push(o); if (fx.length > 46) fx.shift(); return o; }
 // bulgărele de lumină e desenat o singură dată într-o textură și apoi doar scalat
 // (un gradient radial pe cadru, pentru fiecare fulger, ar mânca tot CPU-ul)
@@ -98,13 +101,13 @@ const IMPACT_WORDS = ["BAM!", "POC!", "PAF!", "BUM!", "TRAOSC!", "ZDRANG!"];
 function impact(x, y, power, color, word) {
   const p = clamp(power, 0.2, 2.4);
   addFx({ t: "ring", x, y, r0: 6 * p, r1: 40 + 46 * p, life: Math.round(12 + 8 * p), color: color || "#ffffff", lw: 2 + 2.4 * p });
-  addFx({ t: "flash", x, y, r: 26 + 34 * p, life: Math.round(5 + 4 * p) });
-  spawnSparks(x, y, Math.round(7 + 13 * p), color || "#ffffff", 0.6 + p * 0.6);
+  addFx({ t: "flash", x, y, r: 20 + 22 * p, life: Math.round(4 + 3 * p) });
+  spawnSparks(x, y, Math.round((7 + 13 * p) * 0.55), color || "#ffffff", 0.6 + p * 0.6);
   shakeScreen(2.6 * p * p);
   freeze(Math.round(1 + 3.4 * p));
-  fightHeat = Math.min(1, fightHeat + 0.16 * p);
-  if (p >= 0.9) addFx({ t: "lines", x, y, n: Math.round(7 + 6 * p), len: 30 + 40 * p, life: Math.round(8 + 5 * p), color: color || "#ffffff" });
-  if (p >= 1.35 || word) addFx({ t: "word", x, y: y - 58, s: word || pick(IMPACT_WORDS), life: 32, color: color || "#ffffff", size: 15 + 8 * p });
+  fightHeat = Math.min(1, fightHeat + 0.09 * p);
+  if (p >= 1.3) addFx({ t: "lines", x, y, n: Math.round(5 + 4 * p), len: 26 + 30 * p, life: Math.round(7 + 4 * p), color: color || "#ffffff" });   // linii de viteză doar la lovituri mari
+  if (p >= 1.7 || word) addFx({ t: "word", x, y: y - 58, s: word || pick(IMPACT_WORDS), life: 32, color: color || "#ffffff", size: 15 + 8 * p });  // „BAM!" doar la cele grele
 }
 // undă de șoc pe sol (aterizări grele, finisher-e)
 function groundShock(x, power) {
@@ -169,7 +172,7 @@ function drawHeatOverlay() {
     _heatW = W; _heatH = H;
   }
   ctx.save();
-  ctx.globalAlpha = ((fightHeat - 0.15) / 0.85) * 0.3;
+  ctx.globalAlpha = ((fightHeat - 0.15) / 0.85) * 0.14;
   ctx.fillStyle = _heatGrad; ctx.fillRect(0, 0, W, H);
   ctx.restore();
 }
@@ -497,11 +500,11 @@ class Agent {
     this.face = vx >= 0 ? -1 : 1;
   }
   knockout(dir) {
-    slowMo = Math.max(slowMo, 52);
-    freeze(12); shakeScreen(20);
-    impact(this.x, this.chestY(), 2.2, this.c.color, "K.O.!");
-    addFx({ t: "lines", x: this.x, y: this.chestY(), n: 16, len: 120, life: 22, color: this.c.color });
-    this.launch(dir * 15, 17);
+    slowMo = Math.max(slowMo, 24);
+    freeze(9); shakeScreen(11);
+    impact(this.x, this.chestY(), 1.7, this.c.color, "K.O.!");
+    addFx({ t: "lines", x: this.x, y: this.chestY(), n: 11, len: 90, life: 18, color: this.c.color });
+    this.launch(dir * 11, 14);
     this.hp = 0; this.koTimer = 54;
   }
 
@@ -520,15 +523,15 @@ class Agent {
     // CIOCNIRE DE SĂBII: dacă amândoi taie în același timp, lamele se izbesc
     if (sword && o.weapon === "sword" && o.attackAnim > 0 && Math.abs(o.x - this.x) < 110) {
       const mx = (this.x + o.x) / 2, my = (this.chestY() + o.chestY()) / 2;
-      impact(mx, my, 1.5, "#ffffff", "CLING!");
-      spawnSparks(mx, my, 30, "#ffe9a8", 1.6);
+      impact(mx, my, 1.3, "#ffffff", "CLING!");
+      spawnSparks(mx, my, 16, "#ffe9a8", 1.4);
       this.knock -= this.face * 9; o.knock += this.face * 9;
       this.stun = 20; o.stun = 20; this.combo = 0; o.combo = 0;
       this.attackAnim = 0; o.attackAnim = 0; o.pendingHit = null;
       this.punchTimer = rand(16, 30); o.punchTimer = rand(16, 30);
       return;
     }
-    const finisher = !sword && this.combo >= 2 && Math.random() < 0.6;
+    const finisher = !sword && this.combo >= 2 && Math.random() < 0.3;   // finisher-ele rămân o raritate
     const m = sword ? SWORD_MOVE : (finisher ? pick(FINISHERS) : pick(MOVES));
     this.attackType = m.id; this.attackAnim = m.dur; this.attackDur = m.dur;
     this.pendingHit = { o, m, t: Math.max(2, Math.round(m.dur * 0.45)) };
@@ -538,7 +541,7 @@ class Agent {
       this.speak(pick(["HAAA!", "Ia asta!", "Gata cu tine!"]), 30);
     }
     // apărătorul poate ridica garda exact la timp (parare)
-    if (o.stun <= 0 && !o.isPlayer && Math.random() < (finisher ? 0.16 : 0.26)) o.guard = Math.round(m.dur * 0.75);
+    if (o.stun <= 0 && !o.isPlayer && Math.random() < (finisher ? 0.24 : 0.38)) o.guard = Math.round(m.dur * 0.75);   // parează des → mai multă schimă, mai puțină carne
   }
   resolveHit(o, m) {
     if (!o || !o.canBeHit() || Math.abs(o.x - this.x) > m.reach + 44) { this.combo = 0; return; }
@@ -904,7 +907,7 @@ class Agent {
       // plasă de siguranță: dacă niciunul nu e „la rând", bătaia s-ar bloca — repornește schimbul
       if (!this.attacker && !o.attacker && this.stun <= 0 && this.chargeT <= 0 && !this.pendingHit) { this.attacker = true; this.punchTimer = rand(8, 20); }
       const bow = this.weapon === "bow", ranged = bow || this._orbFight, wantD = bow ? 210 : (this._orbFight ? 175 : 52);
-      const rush = 2.5 + fightHeat * 2.2;                               // se reped unul la altul; cu cât e mai încinsă bătaia, cu atât mai tare
+      const rush = 1.9 + fightHeat * 1.2;                               // se apropie hotărât, dar fără să se teleporteze unul în altul
       if (this.stun > 0) {
         this.walkPhase += 0.04;                                         // amețit: doar se clatină
       } else if (this.chargeT > 0) {                                    // ÎNCARCĂ energie (AvM): particule atrase spre pumn
@@ -919,7 +922,7 @@ class Agent {
         const s = dx !== 0 ? Math.sign(dx) : (agents.indexOf(this) < agents.indexOf(o) ? 1 : -1);
         this.x -= s * (this.speed + 0.5) * 1.6; this.walkPhase += 0.16;
       } else if (this.attacker && this.punchTimer-- <= 0) {
-        this.punchTimer = rand(ranged ? 26 : 8, ranged ? 50 : 20);      // schimburi mult mai rapide decât înainte
+        this.punchTimer = rand(ranged ? 32 : 14, ranged ? 58 : 30);     // schimburi vioaie, dar cu pauze de respirat
         if (bow) {
           this.attackType = "bow"; this.attackAnim = 16; this.attackDur = 16;
           arrows.push({ x: this.x + this.face * 20, y: groundY - this.feetOffset() - 96, vx: this.face * 11, foe: o, life: 160, owner: this });
@@ -931,7 +934,7 @@ class Agent {
         } else {
           this.swingAt(o);
         }
-        this.attacker = false; o.attacker = true; o.punchTimer = rand(6, 16);
+        this.attacker = false; o.attacker = true; o.punchTimer = rand(12, 24);
       }
       if (--this.stateTimer <= 0 && this.chargeT <= 0 && this.hp > this.maxHp * 0.4 && o.hp > o.maxHp * 0.4) this.endFight(); // sub 40% viață se luptă până la KO
     }
@@ -953,7 +956,7 @@ class Agent {
         } else {
           const r = Math.random();
           const foe = this.weapon ? agents.find(o => o !== this && !o.isPlayer && !o.away && !o.opponent && (o.state === "walk" || o.state === "idle") && Math.abs(o.x - this.x) < 480) : null;
-          if (this.weapon && foe && r < 0.06) { // înarmat → provoacă la luptă
+          if (this.weapon && foe && r < 0.03) { // înarmat → provoacă la luptă (rar: scena nu e doar bătaie)
             startFightBetween(this, foe);
           } else if (!this.weapon && weapons.some(s => !s.taken) && r < 0.05) { // neînarmat → ia o armă
             this._wpT = weapons.find(s => !s.taken); this.state = "getweapon"; this.targetX = null; this.speak(pick(["O armă!", "A mea!", "Hei!"]), 80);
@@ -3593,14 +3596,14 @@ function loop() {
   // ---- ritmul cadrului: freeze-frame la impact, slow-motion la KO ----
   let step = true;
   if (hitStop > 0) { hitStop--; step = false; }                 // impactul „îngheață" imaginea o clipă
-  else if (slowMo > 0) { slowMo--; if (frame % 3 !== 0) step = false; } // KO = totul la o treime din viteză
+  else if (slowMo > 0) { slowMo--; if (frame % 2 !== 0) step = false; } // KO = totul la jumătate de viteză
   if (step) updateFx();
   // ---- zgâlțâitul camerei (cu supra-scalare, ca să nu apară margini goale) ----
-  if (shakeMag > 0.25) { shakeX = rand(-shakeMag, shakeMag); shakeY = rand(-shakeMag, shakeMag) * 0.75; if (step) shakeMag *= 0.86; }
+  if (shakeMag > 0.25) { shakeX = rand(-shakeMag, shakeMag); shakeY = rand(-shakeMag, shakeMag) * 0.75; if (step) shakeMag *= 0.8; }   // se potolește repede
   else { shakeMag = 0; shakeX = 0; shakeY = 0; }
   ctx.clearRect(0, 0, W, H);
   ctx.save();
-  if (shakeMag) { const s = 1 + Math.min(0.06, shakeMag / 220); ctx.translate(W / 2 + shakeX, H / 2 + shakeY); ctx.scale(s, s); ctx.translate(-W / 2, -H / 2); }
+  if (shakeMag) { const s = 1 + Math.min(0.03, shakeMag / 260); ctx.translate(W / 2 + shakeX, H / 2 + shakeY); ctx.scale(s, s); ctx.translate(-W / 2, -H / 2); }
   drawSky();
   drawTaskbar();
   drawWallpaper();
