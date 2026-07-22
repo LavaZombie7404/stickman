@@ -7,6 +7,9 @@ Un mini-site (fan-project) cu gașca de stick-figures din **Animator vs. Animati
   Red `#CC0000`, Yellow `#FFCC00`, Green `#66CC00`, Blue `#33CCFF`,
   Purple `#980098`, King Orange `#CC6600`.
 - 💬 **Vorbește** cu fiecare — au personalități distincte, răspund în română, scurt.
+- 🎨 **„Fă-mi o rachetă"** — îi ceri în chat și chiar o desenează în scenă: 27 de forme
+  gata făcute (casă, turn, robot, pisică, sabie, fantomă…), iar cu cheia Claude poate
+  desena **orice** îi ceri. Desenul devine platformă reală de parkour.
 - 👊 **Bătăi în stil AvM** — combo-uri, upercut care te trimite prin aer, blocări și
   parări, ciocniri de săbii, orbi de energie încărcați, raze, freeze-frame la impact,
   zgâlțâit de ecran, slow-motion la KO și bare de viață.

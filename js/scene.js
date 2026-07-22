@@ -322,6 +322,15 @@ class Agent {
     if (this.opponent) this.endFight();
     this.speak(pick(["M-am agățat! 🧗", "Aici stau!", "Sus!"]), 80);
   }
+  // începe un desen la locul dat (imediat deasupra capului lui)
+  startDoodle(spot, forced) {
+    this.doodle = forced ? forced : makeDoodle(spot.cx, spot.cy, spot.s, this.c.color);
+    this.doodle.cx = spot.cx; this.doodle.cy = spot.cy; this.doodle.s = spot.s;
+    this.face = spot.cx >= this.x ? 1 : -1;
+    this._drawFrom = this.state === "ondraw" ? this.onDraw : null;   // desenează de pe alt desen? se întoarce pe el
+    this.state = "draw"; this.doodleReveal = 0; this.drawTimer = Math.max(70, this.doodle.totalPts * 2);
+    this.speak(pick(["Desenez! 🎨", "Artă!", "O capodoperă!", "Uite ce fac!"]), 110);
+  }
   landOnDrawing(d) { // aterizează și STĂ pe vârful desenului (coliziune pe top, ca la ferestre)
     this.state = "ondraw"; this.onDraw = d;
     this.tz = groundY - (d.cy - d.s);            // picioarele pe partea de sus a desenului
@@ -346,11 +355,15 @@ class Agent {
         const t = pick(jumpTargets), dx = t.cx - this.x;
         this.onDraw = null; this.state = "thrown"; this.tangle = 0; this.tangVel = 0; this.bounces = 0;
         this.tvx = clamp(dx / 20, -11, 11); this.tzv = -9;   // impuls în sus + spre țintă (arc de salt)
+        this.tz = this.tz || 0; this.spinToFeet();
         this.landDrawing = t; this.face = dx >= 0 ? 1 : -1;
         this.squash = 0.5; spawnDust(this.x, groundY - this.tz, 4);
         this.speak(pick(["Hop! 🤸", "Parkour!", "Săritură!", "Uite!"]), 60);
         return;
       }
+      // sus pe desen → desenează încă unul mai sus (așa cresc turnuri de desene pt. parkour)
+      const up = doodleSpot(this);
+      if (up && Math.random() < 0.4) { this.onDrawVX = 0; this.startDoodle(up); this.speak(pick(["Mai sus! 🎨", "Și încă unul!", "Construim în sus!"]), 90); return; }
       if (Math.random() < 0.5) { this.onDrawVX = (Math.random() < 0.5 ? -1 : 1) * this.speed; this.onDrawTimer = rand(50, 130); }
       else { this.onDrawVX = 0; this.onDrawTimer = rand(40, 100); }
     }
@@ -404,9 +417,8 @@ class Agent {
     this.tz = Math.max(0, groundY - this.heldY);
     this.tvx = clamp(vx, -22, 22);
     this.tzv = clamp(vy, -26, 8);
-    this.tangle = 0;
-    this.tangVel = clamp(vx, -22, 22) * 0.03 + rand(-0.05, 0.05);
     this.bounces = 0;
+    this.spinToFeet();   // se rotește exact cât să aterizeze în picioare
     this.face = this.tvx >= 0 ? 1 : -1;
     this.speak(pick(["Woohoo!", "Aaaa!", "Zbooor!"]), 80);
   }
@@ -459,6 +471,17 @@ class Agent {
     }
     return true;
   }
+  // Câte rotiri complete apucă să facă până atinge pământul → aterizează exact pe picioare,
+  // nu în cap. Rezolvăm ecuația căderii, aflăm în câte cadre ajunge jos și potrivim viteza
+  // de rotație la un număr ÎNTREG de ture în acel timp.
+  spinToFeet() {
+    const g = 0.85, v0 = this.tzv, h = Math.max(0, this.tz);
+    const t = (-v0 + Math.sqrt(Math.max(0, v0 * v0 + 2 * g * h))) / g;   // cadre până la sol
+    this.tangle = 0;
+    if (!isFinite(t) || t < 14) { this.tangVel = 0; return; }            // zbor prea scurt → nicio rotire
+    const n = Math.max(1, Math.round(t * 0.085 / (Math.PI * 2)));        // ~0.085 rad/cadru = ritm natural
+    this.tangVel = (this.tvx >= 0 ? 1 : -1) * (Math.PI * 2 * n) / t;
+  }
   launch(vx, vz) {
     if (this.state === "held" || this.state === "dead") return;
     // ține minte cu cine se bătea: după ce aterizează se ridică și se întoarce la bătaie
@@ -468,7 +491,7 @@ class Agent {
     this.opponent = null;
     this.state = "thrown"; this.tz = Math.max(this.tz || 0, this.feetOffset());
     this.tvx = clamp(vx, -30, 30); this.tzv = -Math.abs(vz);
-    this.tangle = 0; this.tangVel = clamp(vx, -26, 26) * 0.035; this.bounces = 0;
+    this.bounces = 0; this.spinToFeet();
     this.landWin = this.landStruct = this.landDrawing = null;
     this.face = vx >= 0 ? -1 : 1;
   }
@@ -695,7 +718,10 @@ class Agent {
       if (this.doodle) this.doodleReveal += this.doodle.totalPts / this.drawTimer;
       if (!this.doodle || this.doodleReveal >= this.doodle.totalPts) {
         if (this.doodle) { drawings.push(this.doodle); if (drawings.length > 14) drawings.shift(); }
-        this.doodle = null; this.state = "idle"; this.targetX = null; this.stateTimer = rand(60, 140);
+        this.doodle = null;
+        const from = this._drawFrom; this._drawFrom = null;
+        if (from && drawings.includes(from)) { this.landOnDrawing(from); this.say = null; }  // era cocoțat pe un desen → rămâne acolo
+        else { this.state = "idle"; this.targetX = null; this.stateTimer = rand(60, 140); }
         this.speak(pick(["Gata! 🎨", "Frumos, nu?", "Tadaa!"]), 90);
       }
     }
@@ -926,13 +952,8 @@ class Agent {
           } else if (structures.length && r < 0.085) {
             this.onStruct = pick(structures); this.osPhase = "go"; this.state = "onstruct"; this.targetX = null;
             this.speak(pick(["Mă urc pe clădire! 🧗", "Sus pe casă!", "La înălțime!"]), 90);
-          } else if (r < 0.105) {
-            const cx = clamp(this.x + rand(-40, 40), 90, W - 90);
-            const cy = rand(90, Math.max(130, groundY - 190));
-            this.doodle = makeDoodle(cx, cy, rand(30, 48), this.c.color);
-            this.face = cx >= this.x ? 1 : -1;
-            this.state = "draw"; this.doodleReveal = 0; this.drawTimer = Math.max(70, this.doodle.totalPts * 2);
-            this.speak(pick(["Desenez! 🎨", "Artă!", "O capodoperă!", "Uite ce fac!"]), 110);
+          } else if (r < 0.105 && (this._spot = doodleSpot(this))) {
+            this.startDoodle(this._spot); this._spot = null;   // doodleSpot e aleator: îl calculăm O SINGURĂ dată
           } else if (r < 0.22) { this.state = "run"; this.targetX = rand(80, W - 80); this.stateTimer = rand(120, 260); this.speak(pick(["Aici!", "Repede!", "Hop!"]), 60); }
           else if (r < 0.45) { this.state = "idle"; this.targetX = null; this.stateTimer = rand(60, 140); if (Math.random() < 0.4) this.face *= -1; } // se întoarce să privească în jur
           else { // mers cu sens: spre alt stickman (socializare), plimbare scurtă prin apropiere, sau traversare
@@ -1146,7 +1167,8 @@ class Agent {
       this.tz = 0;
       if (this.tzv > 5 && this.bounces < 2) {
         this.bounces++;
-        this.tzv = -this.tzv * 0.45; this.tvx *= 0.6; this.tangVel *= 0.6;
+        this.tzv = -this.tzv * 0.45; this.tvx *= 0.6;
+        this.spinToFeet();   // arc nou → recalculează turele
         spawnDust(this.x, groundY, 6);
       } else {
         this.squash = 1.4; spawnDust(this.x, groundY, 8);
@@ -1207,8 +1229,12 @@ class Agent {
     if (this.state === "held") {
       ctx.translate(pointer.x, this.heldY);
     } else if (this.state === "thrown") {
-      ctx.translate(this.x, groundY - this.tz);
+      // se rotește în jurul MIJLOCULUI corpului, nu al tălpilor — altfel, când e cu capul în jos,
+      // jumătate din el intra în pământ. Cu pivotul la mijloc, corpul rămâne mereu deasupra solului.
+      const piv = 72;
+      ctx.translate(this.x, groundY - Math.max(0, this.tz) - piv);
       ctx.rotate(this.tangle);
+      ctx.translate(0, piv);
     } else if (this.state === "climb" || this.state === "climbwin" || this.state === "onwin" || this.state === "onstruct" || this.state === "ondraw" || (this.isPlayer && this.tz > 0.5) || (this.state === "gopaint" && this.tz > 0)) {
       ctx.translate(this.x, groundY - this.tz); // sub-pixel (fără rotunjire = mișcare lină)
       if (this.squash > 0.02) { scaleY *= 1 - this.squash * 0.28; scaleX *= 1 + this.squash * 0.24; }
@@ -2046,6 +2072,97 @@ function circlePts(cx, cy, r, n) { const p = []; for (let i = 0; i <= n; i++) { 
 function arcPts(cx, cy, r, a0, a1, n) { const p = []; for (let i = 0; i <= n; i++) { const a = a0 + (a1 - a0) * i / n; p.push({ x: cx + Math.cos(a) * r, y: cy + Math.sin(a) * r }); } return p; }
 function starPts(cx, cy, r) { const p = []; for (let i = 0; i <= 10; i++) { const a = -Math.PI / 2 + i * Math.PI / 5; const rr = i % 2 === 0 ? r : r * 0.45; p.push({ x: cx + Math.cos(a) * rr, y: cy + Math.sin(a) * rr }); } return p; }
 function heartPts(cx, cy, s) { const p = []; for (let i = 0; i <= 26; i++) { const t = i / 26 * Math.PI * 2; const x = 16 * Math.pow(Math.sin(t), 3); const y = 13 * Math.cos(t) - 5 * Math.cos(2 * t) - 2 * Math.cos(3 * t) - Math.cos(4 * t); p.push({ x: cx + x * s / 16, y: cy - y * s / 16 }); } return p; }
+// Unde are voie să deseneze: chiar deasupra capului lui (nu tocmai în cer) și
+// fără să se suprapună peste un desen deja existent sau peste alt stickman.
+function doodleSpot(a) {
+  const feet = groundY - (a.tz || 0);
+  const headTop = feet - (104 + 2 * a.c.headR);
+  for (let k = 0; k < 10; k++) {
+    const s = rand(28, 44);
+    const cx = clamp(a.x + rand(-26, 26), 90, W - 90);
+    const cy = headTop - 18 - s - rand(0, 26);            // marginea de jos a desenului = puțin peste creștet
+    if (cy - s < 64) continue;                            // nu iese din ecran sus
+    if (drawings.some(d => Math.abs(d.cx - cx) < d.s + s + 14 && Math.abs(d.cy - cy) < d.s + s + 14)) continue;
+    if (agents.some(o => o !== a && !o.away && Math.abs(o.x - cx) < s + 26 && Math.abs((groundY - (o.tz || 0)) - cy) < s + 120)) continue; // nu desenează peste altcineva
+    return { cx, cy, s };
+  }
+  return null;
+}
+// ============ „DESENEAZĂ-MI UN X" ============
+// Bibliotecă de forme în coordonate normalizate (-1..1). Îi ceri unui stickman în chat
+// „fă-mi o rachetă" → se duce, se încordează și o desenează chiar acolo, iar desenul
+// devine platformă reală de parkour (ca orice desen din joc).
+const _cir = (cx, cy, r, n) => { const p = []; for (let i = 0; i <= (n || 16); i++) { const a = i / (n || 16) * Math.PI * 2; p.push([cx + Math.cos(a) * r, cy + Math.sin(a) * r]); } return p; };
+const _arc = (cx, cy, r, a0, a1, n) => { const p = []; for (let i = 0; i <= (n || 10); i++) { const a = a0 + (a1 - a0) * i / (n || 10); p.push([cx + Math.cos(a) * r, cy + Math.sin(a) * r]); } return p; };
+const SHAPES = {
+  casa: { k: ["casa", "casă", "case", "cabana", "cabană", "vila", "vilă", "locuinta", "locuință"], s: [[[-.65, .7], [-.65, -.1], [.65, -.1], [.65, .7], [-.65, .7]], [[-.8, -.1], [0, -.8], [.8, -.1]], [[-.18, .7], [-.18, .18], [.18, .18], [.18, .7]], [[.3, .1], [.3, .42], [.55, .42], [.55, .1], [.3, .1]]] },
+  turn: { k: ["turn", "turnul", "turnuri", "castel", "far"], s: [[[-.35, .85], [-.35, -.5], [.35, -.5], [.35, .85]], [[-.45, -.5], [-.45, -.72], [-.22, -.72], [-.22, -.58], [0, -.58], [0, -.72], [.22, -.72], [.22, -.58], [.45, -.58], [.45, -.5], [-.45, -.5]], [[-.15, .85], [-.15, .35], [.15, .35], [.15, .85]]] },
+  copac: { k: ["copac", "copaci", "brad", "brazi", "pom", "pomi", "arbore", "padure", "pădure"], s: [[[-.12, .9], [-.12, .1], [.12, .1], [.12, .9]], _cir(0, -.25, .55, 20), [[-.3, .1], [0, -.1], [.3, .1]]] },
+  foc: { k: ["foc", "flacara", "flacără", "focul", "tabara", "tabără"], s: [[[-.5, .8], [-.2, .1], [-.35, .2], [0, -.85], [.35, .2], [.2, .1], [.5, .8], [-.5, .8]], [[-.2, .8], [0, .2], [.2, .8]]] },
+  soare: { k: ["soare", "soarele"], s: [_cir(0, 0, .45, 18), ...[0, 1, 2, 3, 4, 5, 6, 7].map(i => { const a = i / 8 * Math.PI * 2; return [[Math.cos(a) * .6, Math.sin(a) * .6], [Math.cos(a) * .95, Math.sin(a) * .95]]; })] },
+  luna: { k: ["luna", "lună", "semiluna"], s: [[..._arc(0, 0, .8, .55, 5.73, 22), ..._arc(-.32, 0, .72, 5.5, .78, 16).reverse()]] },
+  stea: { k: ["stea", "steaua", "stele", "steluta", "steluță"], s: [(() => { const p = []; for (let i = 0; i <= 10; i++) { const a = -Math.PI / 2 + i * Math.PI / 5, r = i % 2 ? .42 : .95; p.push([Math.cos(a) * r, Math.sin(a) * r]); } return p; })()] },
+  inima: { k: ["inima", "inimă", "dragoste", "iubire"], s: [(() => { const p = []; for (let i = 0; i <= 40; i++) { const t = i / 40 * Math.PI * 2; p.push([Math.pow(Math.sin(t), 3) * .95, -(.8125 * Math.cos(t) - .3125 * Math.cos(2 * t) - .125 * Math.cos(3 * t) - .0625 * Math.cos(4 * t)) * .95]); } return p; })()] },
+  floare: { k: ["floare", "flori", "lalea", "trandafir"], s: [...[0, 1, 2, 3, 4].map(i => { const a = i / 5 * Math.PI * 2 - Math.PI / 2; return _cir(Math.cos(a) * .45, Math.sin(a) * .45 - .2, .3, 12); }), _cir(0, -.2, .18, 10), [[0, 0], [0, .9]], [[0, .45], [.35, .3]]] },
+  pisica: { k: ["pisica", "pisică", "pisici", "motan", "cat"], s: [_cir(0, 0, .6, 20), [[-.5, -.35], [-.62, -.85], [-.2, -.52]], [[.5, -.35], [.62, -.85], [.2, -.52]], _cir(-.22, -.1, .07, 8), _cir(.22, -.1, .07, 8), [[-.45, .12], [-.12, .2]], [[.45, .12], [.12, .2]], [[-.1, .16], [0, .26], [.1, .16]]] },
+  caine: { k: ["caine", "câine", "caini", "câini", "catel", "cățel", "catei", "căței", "dog"], s: [_cir(0, 0, .55, 20), [[-.55, -.3], [-.72, .05], [-.34, -.02]], [[.55, -.3], [.72, .05], [.34, -.02]], _cir(-.2, -.08, .07, 8), _cir(.2, -.08, .07, 8), _cir(0, .22, .12, 10), [[0, .34], [0, .48]]] },
+  peste: { k: ["peste", "pește", "pesti", "pești"], s: [[[-.5, 0], [-.1, -.42], [.45, 0], [-.1, .42], [-.5, 0]], [[.45, 0], [.9, -.35], [.9, .35], [.45, 0]], _cir(-.22, -.1, .06, 8)] },
+  masina: { k: ["masina", "mașină", "masini", "mașini", "auto", "car"], s: [[[-.9, .3], [-.75, -.05], [-.35, -.05], [-.2, -.45], [.4, -.45], [.55, -.05], [.9, -.05], [.9, .3], [-.9, .3]], _cir(-.5, .38, .22, 12), _cir(.5, .38, .22, 12), [[-.15, -.42], [-.15, -.05]], [[.3, -.42], [.3, -.05]]] },
+  racheta: { k: ["racheta", "rachetă", "rachete", "nava", "navă", "spatiala", "spațială", "rocket"], s: [[[0, -.95], [.32, -.15], [.32, .5], [-.32, .5], [-.32, -.15], [0, -.95]], [[-.32, .18], [-.7, .62], [-.32, .5]], [[.32, .18], [.7, .62], [.32, .5]], _cir(0, -.22, .17, 12), [[-.18, .5], [0, .95], [.18, .5]]] },
+  avion: { k: ["avion", "avioane", "plane"], s: [[[-.9, 0], [.55, -.16], [.9, 0], [.55, .16], [-.9, 0]], [[-.1, -.1], [-.45, -.75], [-.15, -.72], [.15, -.08]], [[-.1, .1], [-.45, .75], [-.15, .72], [.15, .08]], [[-.75, -.05], [-.95, -.32], [-.8, -.3]]] },
+  robot: { k: ["robot", "roboti", "roboți", "androin", "android"], s: [[[-.45, -.55], [.45, -.55], [.45, .05], [-.45, .05], [-.45, -.55]], _cir(-.2, -.32, .09, 8), _cir(.2, -.32, .09, 8), [[-.18, -.12], [.18, -.12]], [[0, -.55], [0, -.78]], _cir(0, -.86, .09, 8), [[-.3, .05], [-.3, .6], [-.12, .6], [-.12, .05]], [[.3, .05], [.3, .6], [.12, .6], [.12, .05]], [[-.45, -.35], [-.8, -.35], [-.8, .2]], [[.45, -.35], [.8, -.35], [.8, .2]]] },
+  sabie: { k: ["sabie", "sabia", "spada", "sword"], s: [[[0, -.95], [.1, -.75], [.1, .35], [-.1, .35], [-.1, -.75], [0, -.95]], [[-.4, .35], [.4, .35]], [[0, .35], [0, .85]], _cir(0, .9, .1, 8)] },
+  scut: { k: ["scut", "scutul", "shield"], s: [[[0, -.85], [.7, -.55], [.7, .1], [0, .9], [-.7, .1], [-.7, -.55], [0, -.85]], [[0, -.6], [0, .55]], [[-.45, -.1], [.45, -.1]]] },
+  fantoma: { k: ["fantoma", "fantomă", "stafie", "ghost"], s: [[..._arc(0, -.15, .6, Math.PI, Math.PI * 2, 16), [.6, .5], [.36, .75], [.12, .5], [-.12, .75], [-.36, .5], [-.6, .75], [-.6, -.15]], _cir(-.22, -.22, .09, 8), _cir(.22, -.22, .09, 8)] },
+  ciuperca: { k: ["ciuperca", "ciupercă", "ciuperci"], s: [[..._arc(0, .05, .85, Math.PI, Math.PI * 2, 18), [-.85, .05]], [[-.3, .05], [-.3, .8], [.3, .8], [.3, .05]], _cir(-.3, -.28, .16, 10), _cir(.28, -.35, .12, 10)] },
+  munte: { k: ["munte", "munti", "munți", "deal"], s: [[[-.95, .7], [-.35, -.5], [0, .05], [.35, -.75], [.95, .7], [-.95, .7]], [[-.52, -.15], [-.35, -.5], [-.18, -.15]], [[.18, -.4], [.35, -.75], [.52, -.4]]] },
+  nor: { k: ["nor", "nori", "cloud"], s: [[..._arc(-.4, .1, .35, Math.PI, Math.PI * 2, 10), ..._arc(0, -.1, .48, Math.PI, Math.PI * 2, 12), ..._arc(.42, .1, .33, Math.PI, Math.PI * 2, 10), [.75, .45], [-.75, .45], [-.75, .1]]] },
+  fulger: { k: ["fulger", "traznet", "trăsnet", "electricitate"], s: [[[.25, -.95], [-.45, .1], [-.02, .1], [-.3, .95], [.45, -.15], [.02, -.15], [.25, -.95]]] },
+  pod: { k: ["pod", "podul", "bridge"], s: [[[-.95, .35], [.95, .35]], _arc(0, .35, .75, Math.PI, Math.PI * 2, 16), [[-.55, .35], [-.55, -.2]], [[0, .35], [0, -.4]], [[.55, .35], [.55, -.2]], [[-.95, .35], [-.95, .8]], [[.95, .35], [.95, .8]]] },
+  smiley: { k: ["fata", "față", "smiley", "zambet", "zâmbet", "emoji"], s: [_cir(0, 0, .9, 24), _cir(-.32, -.22, .1, 8), _cir(.32, -.22, .1, 8), _arc(0, .05, .5, .25 * Math.PI, .75 * Math.PI, 12)] },
+  cheie: { k: ["cheie", "cheia", "key"], s: [_cir(-.5, 0, .35, 14), [[-.15, 0], [.9, 0]], [[.6, 0], [.6, .3]], [[.85, 0], [.85, .28]]] },
+  minge: { k: ["minge", "balon", "cerc", "bila", "bilă"], s: [_cir(0, 0, .9, 26), _arc(0, 0, .9, -1.9, -.4, 10), _arc(0, 0, .55, 0, Math.PI * 2, 16)] },
+};
+// „vreau o casă mare" → potrivește forma cerută (fără diacritice, oriunde în text)
+function findShape(text) {
+  const t = String(text || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
+  for (const id in SHAPES) for (const k of SHAPES[id].k) {
+    const kk = k.normalize("NFD").replace(/[̀-ͯ]/g, "");
+    if (new RegExp("(^|[^a-z])" + kk + "([^a-z]|$)").test(t)) return id;
+  }
+  return null;
+}
+// transformă strokuri normalizate (-1..1) într-un desen adevărat, la scara cerută
+function doodleFromStrokes(norm, cx, cy, s, color) {
+  const strokes = norm.filter(st => st && st.length > 1).map(st => st.map(pt => ({ x: cx + pt[0] * s, y: cy + pt[1] * s })));
+  return { strokes, color, totalPts: strokes.reduce((a, st) => a + st.length, 0), cx, cy, s };
+}
+// API pentru chat: „construiește-mi un X". Întoarce true dacă știe să-l facă singur.
+window.stickBuild = function (agent, text) {
+  if (!agent || agent.away || agent.state === "dead") return false;
+  const id = findShape(text);
+  if (!id) return false;
+  const spot = doodleSpot(agent) || { cx: clamp(agent.x + 60, 90, W - 90), cy: groundY - 260, s: 40 };
+  spot.s = Math.max(spot.s, 42);
+  agent.chatting = false;                                      // iese din chat ca să poată desena
+  agent.startDoodle(spot, doodleFromStrokes(SHAPES[id].s, spot.cx, spot.cy, spot.s, agent.c.color));
+  agent.speak("Imediat! " + id + " 🎨", 120);
+  return true;
+};
+// API pentru chat cu AI: strokuri generate de Claude pentru ORICE obiect
+window.stickDrawStrokes = function (agent, name, norm) {
+  if (!agent || !Array.isArray(norm) || !norm.length) return false;
+  const clean = norm.filter(st => Array.isArray(st) && st.length > 1)
+    .map(st => st.filter(p => Array.isArray(p) && p.length === 2 && isFinite(p[0]) && isFinite(p[1]))
+      .map(p => [clamp(p[0], -1, 1), clamp(p[1], -1, 1)]));
+  if (!clean.length) return false;
+  const spot = doodleSpot(agent) || { cx: clamp(agent.x + 60, 90, W - 90), cy: groundY - 260, s: 44 };
+  spot.s = Math.max(spot.s, 44);
+  agent.chatting = false;
+  agent.startDoodle(spot, doodleFromStrokes(clean, spot.cx, spot.cy, spot.s, agent.c.color));
+  agent.speak("Uite: " + name + " 🎨", 130);
+  return true;
+};
 function makeDoodle(cx, cy, s, color) {
   const type = pick(["smiley", "star", "heart", "house", "sun", "flower", "squiggle", "cat"]);
   const strokes = [];

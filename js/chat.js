@@ -121,6 +121,22 @@ elForm.addEventListener("submit", async (e) => {
     addMsg("bot", n > 0 ? "Venim! 🏃" : "Suntem deja aici. 🙂");
   }
 
+  // comandă specială: „construiește-mi / desenează-mi un X" → chiar îl desenează în scenă
+  const want = buildRequest(msg);
+  if (want) {
+    const who = current;
+    const done = (r) => { addMsg("bot", r); histories[c.id].push({ role: "assistant", content: r }); };
+    if (window.stickBuild && window.stickBuild(who, want)) { done("Gata, îl fac acum! 🎨"); return; }
+    if (hasKey()) {   // nu-l știe din bibliotecă → îi cere lui Claude conturul și desenează exact aia
+      const t2 = addMsg("bot typing", "🎨 desenez…");
+      try {
+        const strokes = await claudeStrokes(want);
+        t2.remove();
+        if (window.stickDrawStrokes && window.stickDrawStrokes(who, want, strokes)) { done("Uite: " + want + " 🎨"); return; }
+      } catch (err) { t2.remove(); }
+    }
+  }
+
   const typing = addMsg("bot typing", "…");
   current.speak("...", 60, false);
 
@@ -138,6 +154,42 @@ elForm.addEventListener("submit", async (e) => {
 });
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+// „fă-mi o casă", „desenează un dragon", „construiește-mi un turn" …
+// Întoarce CE anume a cerut (ex. „dragon violet") sau null dacă mesajul nu e o comandă de desen.
+const stripD = (s) => String(s).toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
+function buildRequest(msg) {
+  const t = stripD(msg).replace(/[?!.,\s]+$/, "").trim();
+  if (/^(ce|cum|unde|cand|cine|care|oare)\s/.test(t)) return null;   // e o întrebare, nu o comandă
+  const m = t.match(/(?:^|\s)(construieste|constuieste|construiesti|construiti|construim|deseneaza|deseneazami|deseneazane|creeaza|fabrica|fa|faci|poti\s+face)(?:[\s-]*(?:mi|ne|imi|mie|nou[aă]))?(?:\s+te\s+rog)?[\s-]+(?:un|o|niste|nist|doua|2)?\s*(.{2,70})$/);
+  if (!m) return null;
+  const what = m[2].replace(/^(te rog|va rog)\s+/, "").trim();
+  // „ce mai faci", „fă ce vrei", „fă ceva" → nu sunt comenzi de desen
+  if (!what || /^(ce|cum|unde|cand|cine|de|sa|ceva|orice|nimic|bine|ok)\b/.test(what)) return null;
+  return what;
+}
+
+// Cere lui Claude conturul obiectului ca linii într-un pătrat -1..1 → stickmanul îl desenează exact.
+async function claudeStrokes(what) {
+  const system = "Ești un generator de desene-linie pentru un joc cu stick-figures. " +
+    "Primești numele unui obiect și întorci DOAR JSON, fără text în jur, fără markdown: " +
+    '{"strokes":[[[x,y],[x,y],...],...]}. ' +
+    "Fiecare stroke e o linie continuă (polilinie) de trasat cu creionul. Coordonate în pătratul " +
+    "[-1,1] × [-1,1], cu y POZITIV ÎN JOS. Umple bine pătratul. Maximum 14 strokuri și 30 de puncte " +
+    "pe stroke. Fă un desen simplu, recognoscibil, din linii — ca un desen de copil pe tablă. " +
+    "Pentru contururi închise repetă primul punct la final. Fără umpluturi, doar linii.";
+  const res = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-api-key": apiKey(), "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
+    body: JSON.stringify({ model: MODEL, max_tokens: 1600, system, messages: [{ role: "user", content: String(what).slice(0, 120) }] }),
+  });
+  if (!res.ok) throw new Error(res.status);
+  const data = await res.json();
+  const txt = ((data.content || []).find(b => b.type === "text") || {}).text || "";
+  const m = txt.match(/\{[\s\S]*\}/);
+  if (!m) throw new Error("fara json");
+  return JSON.parse(m[0]).strokes;
+}
 
 function systemPromptFor(c) {
   return `Ești ${c.name}, un stick-figure din gașca lui Alan Becker (Animator vs. Animation). ` +
@@ -518,6 +570,7 @@ hpanel.innerHTML = `<b style="color:#8ee6a0">🎮 Controalele tale</b><br>
 <b>Trage</b> un stickman — îl ridici & arunci<br>
 <b>Click</b> pe o construcție — o distrugi (trage = muți)<br>
 <b>Click dreapta</b> pe stickman — chat<br>
+<i style="color:#9aa0b0">In chat: „fă-mi o rachetă", „desenează un robot" → chiar îl<br>desenează în scenă (și devine platformă de parkour).</i><br>
 <b>H</b> — arată hitbox-urile · <b>G</b> — efecte`;
 document.body.appendChild(hpanel);
 hbtn.addEventListener("click", () => { hpanel.style.display = hpanel.style.display === "none" ? "block" : "none"; hbtn.blur(); });
