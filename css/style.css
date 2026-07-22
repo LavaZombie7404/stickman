@@ -175,6 +175,7 @@ html, body {
 .pad-btn.pad-me.live { opacity: 1; border-color: #8ee6a0; color: #8ee6a0; }
 
 /* telefoane înguste: 6 butoane rotunde nu încap la 58px, deci se micșorează */
+@media (max-width: 620px) { #gamePad { bottom: 130px; } }   /* taskbar pe două rânduri = mai înalt */
 @media (max-width: 430px) {
   #gamePad { padding: 0 8px; }
   #gamePad .pad-move, #gamePad .pad-act { gap: 7px; }

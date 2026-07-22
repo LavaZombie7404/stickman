@@ -1706,6 +1706,8 @@ let player = null, playerCount = 0;           // stickman controlat de tine (tas
 const keys = new Set();                        // taste apăsate (A/D/săgeți)
 let sprintHeld = false;                         // Ctrl sau Shift ținut → sprint (citit direct din event, robust)
 
+// ecran îngust (telefon) → taskbar-ul se desface pe două rânduri, cu iconițe mari
+function twoRowBar() { return window.innerWidth < 620; }
 function resize() {
   const dpr = viewDpr = window.devicePixelRatio || 1;
   W = window.innerWidth; H = window.innerHeight;
@@ -1714,7 +1716,8 @@ function resize() {
   canvas.style.width = W + "px"; canvas.style.height = H + "px";
   if (gl) { gfx.width = pxW; gfx.height = pxH; gl.viewport(0, 0, pxW, pxH); }
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  groundY = Math.max(180, H - 90);
+  groundY = Math.max(180, H - (twoRowBar() ? 124 : 90));   // taskbar-ul pe două rânduri e mai înalt
+
 }
 // ---- WebGL: compilează programul de compunere + quad + textură ----
 function initGL(g) {
@@ -1833,7 +1836,8 @@ window.addEventListener("mousemove", (e) => {
     for (const mob of m.mobs) { mob.px *= ratio; mob.py *= ratio; mob.vy *= ratio; }
     return;
   }
-  if (pointer.dragStruct) { const d = pointer.dragStruct, nx = clamp(pointer.x - d.ox, 40, W - 40), ddx = nx - d.s.x; d.s.x = nx; d.s.by = clamp(pointer.y - d.oy, 120, groundY); for (const a of agents) if (a.state === "onstruct" && a.onStruct === d.s) a.x += ddx; return; }
+  if (pointer.dragStruct) { pointer.moved += Math.hypot(pointer.x - pointer.px, pointer.y - pointer.py);   // altfel orice mutare de casă se termina și cu o lovitură în ea
+    const d = pointer.dragStruct, nx = clamp(pointer.x - d.ox, 40, W - 40), ddx = nx - d.s.x; d.s.x = nx; d.s.by = clamp(pointer.y - d.oy, 120, groundY); for (const a of agents) if (a.state === "onstruct" && a.onStruct === d.s) a.x += ddx; return; }
   if (pointer.dragMc) {
     const m = minecraftWin;
     const nx = clamp(pointer.x - pointer.dragMc.ox, -m.w + 120, W - 120), ny = clamp(pointer.y - pointer.dragMc.oy, 0, groundY - 60);
@@ -3074,8 +3078,17 @@ canvas.addEventListener("touchstart", (e) => {
 canvas.addEventListener("touchmove", (e) => {
   const t = findTouch(e); if (!t) return;
   e.preventDefault();
-  if (Math.hypot(t.clientX - touchFrom.x, t.clientY - touchFrom.y) > 10) clearTimeout(touchTimer);  // s-a mișcat → nu mai e apăsare lungă
+  const far = Math.hypot(t.clientX - touchFrom.x, t.clientY - touchFrom.y);
+  if (far > 8) clearTimeout(touchTimer);          // s-a mișcat → nu mai e apăsare lungă
   fireMouse("mousemove", t.clientX, t.clientY);
+  // Ridicatul NU se lasă pe seama distanței adunate din pași mici (degetul face pași
+  // mari și rari, iar unele telefoane le comasează): dacă s-a dus de la locul unde ai
+  // pus degetul, îl iei în mână. Fără asta, tragerea ieșea doar ca o lovitură.
+  if (!pointer.grabbed && pointer.cand && far > 8 && !touchWasLong) {
+    pointer.down = true; pointer.moved = far;
+    pointer.grabbed = pointer.cand; pointer.grabbed.grab();
+  }
+  if (pointer.grabbed) pointer.grabbed.heldY = Math.min(t.clientY, groundY);
 }, { passive: false });
 function endTouch(e) {
   const t = findTouch(e); if (!t) return;
@@ -3348,19 +3361,24 @@ function drawTaskbar() {
   ctx.strokeStyle = "rgba(255,255,255,0.18)"; ctx.lineWidth = 2;
   ctx.beginPath(); ctx.moveTo(0, groundY); ctx.lineTo(W, groundY); ctx.stroke();
   const icons = [["search", drawSearchIcon], ["chrome", drawChromeIcon], ["minecraft", drawMinecraftIcon], ["lol", drawLoLIcon], ["stopwatch", drawStopwatchIcon], ["settings", drawSettingsIcon], ["notepad", drawNotepadIcon], ["paint", drawPaintIcon]];
-  // pe telefon nu încap 8 iconițe la 48px → se micșorează cât să intre între Start și ceas
-  const s = Math.max(22, Math.min(48, bh - 30, (W - 130) / (icons.length * 1.55)));
+  // pe telefon 8 iconițe pe un rând ies minuscule → le punem pe DOUĂ rânduri, mari cât să le nimerești cu degetul
+  const rows = twoRowBar() ? 2 : 1, per = Math.ceil(icons.length / rows);
+  const s = Math.max(22, Math.min(48, bh / rows - 12, (W - 130) / (per * 1.55)));
   const gap = s * 0.55;
-  const totalW = icons.length * s + (icons.length - 1) * gap;
-  const cy = groundY + bh / 2 + 2;
-  let cx = W / 2 - totalW / 2 + s / 2;
+  const cyMid = groundY + bh / 2 + 2;
   taskIcons = [];
-  for (const [name, fn] of icons) { fn(cx, cy, s); taskIcons.push({ name, cx, cy, s }); cx += s + gap; }
+  for (let r = 0; r < rows; r++) {
+    const line = icons.slice(r * per, (r + 1) * per);
+    const totalW = line.length * s + (line.length - 1) * gap;
+    const cy = rows === 1 ? cyMid : groundY + bh * (r === 0 ? 0.3 : 0.72);
+    let cx = W / 2 - totalW / 2 + s / 2;
+    for (const [name, fn] of line) { fn(cx, cy, s); taskIcons.push({ name, cx, cy, s }); cx += s + gap; }
+  }
   // Start (stânga)
-  const ss = s * 0.72, sx = 24 + ss / 2;
-  drawStartIcon(sx, cy, ss); taskIcons.push({ name: "start", cx: sx, cy, s: ss });
+  const ss = Math.min(s, 34) * 0.9, sx = 20 + ss / 2;
+  drawStartIcon(sx, cyMid, ss); taskIcons.push({ name: "start", cx: sx, cy: cyMid, s: ss });
   // ceas (dreapta)
-  drawClock(W - 14, cy);
+  drawClock(W - 14, cyMid);
 }
 function drawStartIcon(cx, cy, s) {
   const q = s * 0.4, g = s * 0.12; ctx.fillStyle = "#4aa3ff";
