@@ -1930,7 +1930,16 @@ function openWindows() { const l = []; if (browserWin) l.push(browserWin); if (s
 // ferestre pe care se poate STA/urca — include Minecraft (dar Minecraft are drag/resize propriu)
 function standWindows() { const l = openWindows(); if (minecraftWin) l.push(minecraftWin); return l; }
 // case/structuri: cutie de coliziune (pt. apucat) și hit-test
-function structBox(s) { const d = { house: [62, 138], tower: [34, 172], tree: [42, 122], campfire: [40, 56] }[s.type] || [50, 120]; const sc = s.scale || 1; return { hw: d[0] * sc, h: d[1] * sc }; }
+function structBox(s) {
+  const sc = s.scale || 1;
+  if (s.type === "custom" && s.cells) {   // construcție din blocuri: cutia iese din grilă
+    let lo = 1e9, hi = -1e9;
+    for (const c of s.cells) { if (c[0] < lo) lo = c[0]; if (c[0] > hi) hi = c[0]; }
+    return { hw: Math.max(1, (hi - lo + 1) / 2) * 16 * sc, h: s.rows * 16 * sc };
+  }
+  const d = { house: [62, 138], tower: [34, 172], tree: [42, 122], campfire: [40, 56] }[s.type] || [50, 120];
+  return { hw: d[0] * sc, h: d[1] * sc };
+}
 function structureAt(x, y) { for (let i = structures.length - 1; i >= 0; i--) { const s = structures[i], b = structBox(s), base = s.by || groundY; if (x >= s.x - b.hw && x <= s.x + b.hw && y >= base - b.h && y <= base) return s; } return null; }
 // lovește o construcție: cad blocuri de sus în jos; destule lovituri → dărâmată cu moloz
 function damageStructure(s) {
@@ -2137,32 +2146,91 @@ function doodleFromStrokes(norm, cx, cy, s, color) {
   const strokes = norm.filter(st => st && st.length > 1).map(st => st.map(pt => ({ x: cx + pt[0] * s, y: cy + pt[1] * s })));
   return { strokes, color, totalPts: strokes.reduce((a, st) => a + st.length, 0), cx, cy, s };
 }
-// API pentru chat: „construiește-mi un X". Întoarce true dacă știe să-l facă singur.
-window.stickBuild = function (agent, text) {
+// „CONSTRUIEȘTE-MI UN X" → nu un desen, ci o construcție ADEVĂRATĂ din blocuri
+// (ca în Animation vs. Minecraft): transformăm conturul în blocuri pe o grilă, iar
+// stickmanul o ridică rând cu rând. Are coliziune, te poți urca pe ea și se poate dărâma.
+const BUILD_COLS = 17;
+// Transformă conturul în blocuri. Face DOUĂ treceri: una cu suprafețele pline (corpul) și
+// una doar cu liniile (contur + detalii: ochi, ferestre, guri). Blocurile din a doua trecere
+// primesc alt ton, ca detaliile să se vadă și la rezoluția asta mică.
+function rasterizeShape(norm, cols) {
+  const N = cols || BUILD_COLS, SS = 6, SZ = N * SS;
+  const T = (v) => (v + 1) / 2 * (SZ - SS * 1.4) + SS * 0.7;
+  const pass = (doFill) => {
+    const cv = document.createElement("canvas"); cv.width = cv.height = SZ;
+    const g = cv.getContext("2d");
+    g.lineJoin = g.lineCap = "round"; g.lineWidth = SS * 1.05; g.strokeStyle = "#fff"; g.fillStyle = "#fff";
+    for (const st of norm) {
+      if (!st || st.length < 2) continue;
+      g.beginPath(); g.moveTo(T(st[0][0]), T(st[0][1]));
+      for (let i = 1; i < st.length; i++) g.lineTo(T(st[i][0]), T(st[i][1]));
+      const a = st[0], b = st[st.length - 1], closed = st.length > 3 && Math.hypot(a[0] - b[0], a[1] - b[1]) < 0.12;
+      if (doFill) { if (closed) { g.closePath(); g.fill(); } }
+      else g.stroke();
+    }
+    return g.getImageData(0, 0, SZ, SZ).data;
+  };
+  const fill = pass(true), line = pass(false);
+  const on = (d, r, c) => { let h = 0; for (let y = 1; y < SS; y += 2) for (let x = 1; x < SS; x += 2) if (d[(((r * SS + y) * SZ) + (c * SS + x)) * 4 + 3] > 70) h++; return h; };
+  const cells = [];
+  for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) {
+    const l = on(line, r, c), f = on(fill, r, c);
+    if (l >= 2 || f >= 3) cells.push([c - (N - 1) / 2, N - 1 - r, l >= 2 ? 1 : 0]); // x centrat, y de jos în sus, 1 = contur/detaliu
+  }
+  return cells;
+}
+function makeBlockStructure(x, norm, color, name) {
+  const cells = rasterizeShape(norm, BUILD_COLS);
+  if (cells.length < 6) return null;
+  let top = 0, bottom = 1e9;
+  for (const c of cells) { if (c[1] > top) top = c[1]; if (c[1] < bottom) bottom = c[1]; }
+  const shifted = cells.map(c => [c[0], c[1] - bottom, c[2]]);   // lipit de pământ
+  return { x, color, progress: 0, type: "custom", cells: shifted, rows: top - bottom + 1, cols: BUILD_COLS, scale: 0.7, name: name || "" };
+}
+// API pentru chat. mode: "build" = construcție din blocuri, "draw" = desen pe fundal.
+window.stickBuild = function (agent, text, mode) {
   if (!agent || agent.away || agent.state === "dead") return false;
   const id = findShape(text);
   if (!id) return false;
+  agent.chatting = false;
+  if (mode === "build") return startBuilding(agent, SHAPES[id].s, id);
   const spot = doodleSpot(agent) || { cx: clamp(agent.x + 60, 90, W - 90), cy: groundY - 260, s: 40 };
   spot.s = Math.max(spot.s, 42);
-  agent.chatting = false;                                      // iese din chat ca să poată desena
   agent.startDoodle(spot, doodleFromStrokes(SHAPES[id].s, spot.cx, spot.cy, spot.s, agent.c.color));
   agent.speak("Imediat! " + id + " 🎨", 120);
   return true;
 };
-// API pentru chat cu AI: strokuri generate de Claude pentru ORICE obiect
-window.stickDrawStrokes = function (agent, name, norm) {
+// API pentru chat cu AI: contur generat de Claude pentru ORICE obiect
+window.stickDrawStrokes = function (agent, name, norm, mode) {
   if (!agent || !Array.isArray(norm) || !norm.length) return false;
   const clean = norm.filter(st => Array.isArray(st) && st.length > 1)
     .map(st => st.filter(p => Array.isArray(p) && p.length === 2 && isFinite(p[0]) && isFinite(p[1]))
-      .map(p => [clamp(p[0], -1, 1), clamp(p[1], -1, 1)]));
+      .map(p => [clamp(p[0], -1, 1), clamp(p[1], -1, 1)]))
+    .filter(st => st.length > 1);
   if (!clean.length) return false;
+  agent.chatting = false;
+  if (mode === "build") return startBuilding(agent, clean, name);
   const spot = doodleSpot(agent) || { cx: clamp(agent.x + 60, 90, W - 90), cy: groundY - 260, s: 44 };
   spot.s = Math.max(spot.s, 44);
-  agent.chatting = false;
   agent.startDoodle(spot, doodleFromStrokes(clean, spot.cx, spot.cy, spot.s, agent.c.color));
   agent.speak("Uite: " + name + " 🎨", 130);
   return true;
 };
+// pornește șantierul: caută un loc liber lângă el și ridică obiectul bloc cu bloc
+function startBuilding(agent, norm, name) {
+  const nat = { casa: "house", turn: "tower", copac: "tree", foc: "campfire" }[name];   // astea au deja model dedicat
+  let x = clamp(agent.x + (agent.face >= 0 ? 130 : -130), 110, W - 110);
+  for (let k = 0; k < 12 && structures.some(s => Math.abs(s.x - x) < structBox(s).hw + 90); k++) x = clamp(x + 70, 110, W - 110);
+  const s = nat ? { x, color: agent.c.color, progress: 0, type: nat } : makeBlockStructure(x, norm, agent.c.color, name);
+  if (!s) return false;
+  if (structures.length >= 10) structures.shift();
+  structures.push(s);
+  agent.building = s; agent.state = "build"; agent.targetX = null;
+  agent.buildDur = Math.max(200, (s.cells ? s.cells.length * 7 : 340)); agent.buildTimer = agent.buildDur;
+  agent.face = x >= agent.x ? 1 : -1;
+  agent.speak("Construiesc " + (name || "ceva") + "! 🔨", 140);
+  return true;
+}
 function makeDoodle(cx, cy, s, color) {
   const type = pick(["smiley", "star", "heart", "house", "sun", "flower", "squiggle", "cat"]);
   const strokes = [];
@@ -3124,9 +3192,27 @@ function blk(x, y, s, fill) {
 
 // construcții din blocuri stil Minecraft, cresc de jos în sus cu progresul
 function drawStructure(s) {
-  const B = 15 * (s.scale || 1), x = s.x, base = s.by || groundY, p = s.progress, col = s.color;
+  const B = (s.type === "custom" ? 16 : 15) * (s.scale || 1), x = s.x, base = s.by || groundY, p = s.progress, col = s.color;
   const put = (cx, cy, fill) => blk(x + cx * B - B / 2, base - (cy + 1) * B, B, fill);
 
+  if (s.type === "custom") {   // ce i-ai cerut tu, ridicat rând cu rând din blocuri
+    const shown = Math.ceil(p * s.rows);
+    for (const [cx, cy, edge] of s.cells) {
+      if (cy >= shown) continue;
+      put(cx, cy, shade(col, edge ? 1 : (((cx + cy) & 1) ? 0.6 : 0.44)));   // contur/detalii deschise, umplutura inchisa
+    }
+    if (p < 1) {   // rândul care se pune ACUM clipește (se vede că lucrează)
+      const r = shown - 1;
+      ctx.save(); ctx.globalAlpha = 0.35 + Math.abs(Math.sin(frame * 0.25)) * 0.45;
+      for (const c2 of s.cells) if (c2[1] === r) put(c2[0], c2[1], "#ffffff");
+      ctx.restore();
+    }
+    if (s.name && p >= 1) {   // eticheta cu ce e (ca să se vadă că a construit exact ce ai cerut)
+      ctx.save(); ctx.globalAlpha = 0.55; ctx.fillStyle = "#e8ecff"; ctx.font = "11px 'Segoe UI',sans-serif"; ctx.textAlign = "center";
+      ctx.fillText(s.name, x, base - s.rows * B - 8); ctx.restore();
+    }
+    return;
+  }
   if (s.type === "house") {
     const cols = 8, rows = 6, maxRow = 9, shown = Math.ceil(p * maxRow);
     for (let ry = 0; ry < rows; ry++) for (let cx = 0; cx < cols; cx++) {

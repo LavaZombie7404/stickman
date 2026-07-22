@@ -122,17 +122,17 @@ elForm.addEventListener("submit", async (e) => {
   }
 
   // comandă specială: „construiește-mi / desenează-mi un X" → chiar îl desenează în scenă
-  const want = buildRequest(msg);
-  if (want) {
-    const who = current;
+  const req = buildRequest(msg);
+  if (req) {
+    const who = current, icon = req.mode === "build" ? "🔨" : "🎨";
     const done = (r) => { addMsg("bot", r); histories[c.id].push({ role: "assistant", content: r }); };
-    if (window.stickBuild && window.stickBuild(who, want)) { done("Gata, îl fac acum! 🎨"); return; }
-    if (hasKey()) {   // nu-l știe din bibliotecă → îi cere lui Claude conturul și desenează exact aia
-      const t2 = addMsg("bot typing", "🎨 desenez…");
+    if (window.stickBuild && window.stickBuild(who, req.what, req.mode)) { done((req.mode === "build" ? "Îl construiesc acum! " : "Îl desenez acum! ") + icon); return; }
+    if (hasKey()) {   // nu-l știe din bibliotecă → îi cere lui Claude conturul obiectului
+      const t2 = addMsg("bot typing", icon + (req.mode === "build" ? " proiectez…" : " desenez…"));
       try {
-        const strokes = await claudeStrokes(want);
+        const strokes = await claudeStrokes(req.what);
         t2.remove();
-        if (window.stickDrawStrokes && window.stickDrawStrokes(who, want, strokes)) { done("Uite: " + want + " 🎨"); return; }
+        if (window.stickDrawStrokes && window.stickDrawStrokes(who, req.what, strokes, req.mode)) { done("Uite: " + req.what + " " + icon); return; }
       } catch (err) { t2.remove(); }
     }
   }
@@ -161,12 +161,14 @@ const stripD = (s) => String(s).toLowerCase().normalize("NFD").replace(/[̀-ͯ]/
 function buildRequest(msg) {
   const t = stripD(msg).replace(/[?!.,\s]+$/, "").trim();
   if (/^(ce|cum|unde|cand|cine|care|oare)\s/.test(t)) return null;   // e o întrebare, nu o comandă
-  const m = t.match(/(?:^|\s)(construieste|constuieste|construiesti|construiti|construim|deseneaza|deseneazami|deseneazane|creeaza|fabrica|fa|faci|poti\s+face)(?:[\s-]*(?:mi|ne|imi|mie|nou[aă]))?(?:\s+te\s+rog)?[\s-]+(?:un|o|niste|nist|doua|2)?\s*(.{2,70})$/);
+  const m = t.match(/(?:^|\s)(construieste|constuieste|construiesti|construiti|construim|ridica|deseneaza|deseneazami|deseneazane|creeaza|fabrica|fa|faci|poti\s+face)(?:[\s-]*(?:mi|ne|imi|mie|nou[aă]))?(?:\s+te\s+rog)?[\s-]+(?:un|o|niste|nist|doua|2)?\s*(.{2,70})$/);
   if (!m) return null;
   const what = m[2].replace(/^(te rog|va rog)\s+/, "").trim();
   // „ce mai faci", „fă ce vrei", „fă ceva" → nu sunt comenzi de desen
   if (!what || /^(ce|cum|unde|cand|cine|de|sa|ceva|orice|nimic|bine|ok)\b/.test(what)) return null;
-  return what;
+  // „desenează" → desen pe fundal; „construiește / ridică / fă" → construcție din blocuri
+  const mode = /^desen/.test(m[1]) ? "draw" : "build";
+  return { what, mode };
 }
 
 // Cere lui Claude conturul obiectului ca linii într-un pătrat -1..1 → stickmanul îl desenează exact.
@@ -570,7 +572,7 @@ hpanel.innerHTML = `<b style="color:#8ee6a0">🎮 Controalele tale</b><br>
 <b>Trage</b> un stickman — îl ridici & arunci<br>
 <b>Click</b> pe o construcție — o distrugi (trage = muți)<br>
 <b>Click dreapta</b> pe stickman — chat<br>
-<i style="color:#9aa0b0">In chat: „fă-mi o rachetă", „desenează un robot" → chiar îl<br>desenează în scenă (și devine platformă de parkour).</i><br>
+<i style="color:#9aa0b0">In chat: „construiește-mi o rachetă" → o ridică din blocuri<br>(te poți urca pe ea). „Desenează un robot" → o face desen.<br>Cu cheia Claude poate face ORICE îi ceri.</i><br>
 <b>H</b> — arată hitbox-urile · <b>G</b> — efecte`;
 document.body.appendChild(hpanel);
 hbtn.addEventListener("click", () => { hpanel.style.display = hpanel.style.display === "none" ? "block" : "none"; hbtn.blur(); });
