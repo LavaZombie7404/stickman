@@ -872,7 +872,15 @@ class Agent {
     ctx.strokeStyle = c.color; ctx.fillStyle = c.color;
     ctx.lineWidth = 4.5; ctx.lineCap = "round"; ctx.lineJoin = "round"; // linii mai subțiri (nu prea groase)
 
+    skelRec = { pts: [], segs: [], circles: [], last: null };   // înregistrează geometria reală
     this.drawSkeleton(ctx);
+    const rec = skelRec; skelRec = null;
+    if (rec.pts.length) {
+      let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+      for (const p of rec.pts) { if (p[0] < x0) x0 = p[0]; if (p[0] > x1) x1 = p[0]; if (p[1] < y0) y0 = p[1]; if (p[1] > y1) y1 = p[1]; }
+      const lw = 2.4; // jumătate din grosimea liniei — cutia cuprinde și marginea trasului
+      this.hit = { x0: x0 - lw, y0: y0 - lw, x1: x1 + lw, y1: y1 + lw, segs: rec.segs, circles: rec.circles };
+    }
 
     ctx.restore();
 
@@ -989,13 +997,15 @@ class Agent {
     } else if (st === "sleep" && this.sleepPhase !== "goto") {
       seg(-12, 12, -18, 24); seg(12, 12, 18, 24);
     } else {
-      const amt = 0.12 + (running ? 0.83 : 0.5) * moveAmt; // balans braț topit între stat și mers
+      // la mers/fugă brațele se leagănă; când se oprește, cad LIN și rămân fix drepte în jos, pe lângă corp
+      const amt = (running ? 0.95 : 0.62) * moveAmt;
       for (const side of [-1, 1]) {
         const p = this.walkPhase + (side < 0 ? Math.PI : 0);
         const ang = Math.sin(p) * amt;
         const ex = Math.sin(ang) * UPPER, ey = Math.cos(ang) * UPPER;
-        const fa = ang + 0.35 + Math.max(0, Math.sin(p)) * 0.45; // cotul se îndoaie mai mult la balansul înainte
-        seg(ex, ey, ex + Math.sin(fa) * FORE, ey + Math.cos(fa) * FORE);
+        const fa = (ang + 0.35 + Math.max(0, Math.sin(p)) * 0.45) * moveAmt; // cotul se îndoaie doar la mers; la stat antebrațul e vertical
+        const ox = side * 7 * (1 - moveAmt);                                 // umeri ușor depărtați la stat (să nu intre brațele în trunchi)
+        ctx.beginPath(); ctx.moveTo(shX + ox, asY); ctx.lineTo(shX + ox + ex, asY + ey); ctx.lineTo(shX + ox + ex + Math.sin(fa) * FORE, asY + ey + Math.cos(fa) * FORE); ctx.stroke();
       }
     }
 
@@ -1023,6 +1033,7 @@ class Agent {
     // ===== ARMĂ în mână =====
     if (this.weapon) {
       const admiring = st === "getweapon" && this._admire !== undefined;
+      const rec0 = skelRec; skelRec = null;   // arma nu face parte din hitbox-ul corpului
       ctx.save();
       if (admiring) { ctx.translate(shX + 12, shY + 10); ctx.rotate(-0.6 + Math.sin(this.bob * 3) * 0.12); } // ține în față, se uită la ea
       else if (striking) { ctx.translate(shX + 34, asY - 6); ctx.rotate(this.weapon === "bow" ? 0 : -1.05); }
@@ -1036,6 +1047,7 @@ class Agent {
         ctx.strokeStyle = "#c8963c"; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(-7, -2); ctx.lineTo(7, -2); ctx.stroke();
       }
       ctx.restore();
+      skelRec = rec0;
     }
   }
 
@@ -1159,6 +1171,37 @@ function glSupported() { try { return !!document.createElement("canvas").getCont
   if (gl) { gfx = document.createElement("canvas"); ctx = gfx.getContext("2d"); glState = initGL(gl); }
   if (!gl || !glState) { gl = null; glState = null; gfx = null; ctx = canvas.getContext("2d"); } // 2D pur
 })();
+// ---- HITBOX EXACT PE MODEL ----
+// Cât timp desenăm scheletul, reținem fiecare punct/cerc pe care îl trasează canvas-ul
+// (în coordonate de ecran) → cutie lipită fix pe model + segmentele reale ale membrelor,
+// deci hitbox-ul urmează automat orice poză: mers, salt, dash, lovitură, culcat, aruncat.
+let viewDpr = 1, skelRec = null;
+function recXY(c, x, y) { const t = c.getTransform(); return [(t.a * x + t.c * y + t.e) / viewDpr, (t.b * x + t.d * y + t.f) / viewDpr]; }
+(function attachRecorder() {
+  const om = ctx.moveTo, ol = ctx.lineTo, oa = ctx.arc;
+  ctx.moveTo = function (x, y) { if (skelRec) skelRec.pts.push(skelRec.last = recXY(this, x, y)); return om.call(this, x, y); };
+  ctx.lineTo = function (x, y) {
+    if (skelRec) { const p = recXY(this, x, y); if (skelRec.last) skelRec.segs.push([skelRec.last[0], skelRec.last[1], p[0], p[1]]); skelRec.pts.push(skelRec.last = p); }
+    return ol.call(this, x, y);
+  };
+  ctx.arc = function (x, y, r, a0, a1, cc) {
+    if (skelRec) {
+      const t = this.getTransform(), p = recXY(this, x, y), rr = r * Math.hypot(t.a, t.b) / viewDpr;
+      skelRec.circles.push([p[0], p[1], rr]);
+      for (let i = 0; i < 8; i++) skelRec.pts.push([p[0] + Math.cos(i * Math.PI / 4) * rr, p[1] + Math.sin(i * Math.PI / 4) * rr]);
+      skelRec.last = null;
+    }
+    return oa.call(this, x, y, r, a0, a1, cc);
+  };
+})();
+const HIT_PAD = 14;   // cât de departe de linia reală a modelului mai prinde click-ul
+function segDist(px, py, x0, y0, x1, y1) { const dx = x1 - x0, dy = y1 - y0, l2 = dx * dx + dy * dy, t = l2 ? clamp(((px - x0) * dx + (py - y0) * dy) / l2, 0, 1) : 0; return Math.hypot(px - (x0 + t * dx), py - (y0 + t * dy)); }
+function hitDist(h, px, py) {  // distanța de la punct la cel mai apropiat os/cerc al modelului
+  let d = 1e9;
+  for (const s of h.segs) { const v = segDist(px, py, s[0], s[1], s[2], s[3]); if (v < d) d = v; }
+  for (const c of h.circles) { const v = Math.max(0, Math.hypot(c[0] - px, c[1] - py) - c[2]); if (v < d) d = v; }
+  return d;
+}
 // expuse pentru inspecție/feedback (ex. Playwright)
 window.setFx = (v) => { fxLevel = v; };
 window.getRenderInfo = () => ({ webgl: !!gl, fx: fxLevel });
@@ -1202,7 +1245,7 @@ const keys = new Set();                        // taste apăsate (A/D/săgeți)
 let sprintHeld = false;                         // Ctrl sau Shift ținut → sprint (citit direct din event, robust)
 
 function resize() {
-  const dpr = window.devicePixelRatio || 1;
+  const dpr = viewDpr = window.devicePixelRatio || 1;
   W = window.innerWidth; H = window.innerHeight;
   const pxW = Math.round(W * dpr), pxH = Math.round(H * dpr);
   canvas.width = pxW; canvas.height = pxH;
@@ -1252,21 +1295,18 @@ function presentGL() {
 
 function initAgents() { agents = CHARACTERS.map(c => new Agent(c, W)); }
 
+// cine e sub cursor — măsurat pe oasele reale ale modelului (cap, tors, brațe, picioare),
+// nu pe o cutie aproximativă: nimerești exact ce vezi, în orice poză
 function nearestAgent(cx, cy) {
   let best = null, bestD = 1e9;
   for (const a of agents) {
-    if (a.away) continue;
-    let feetY = groundY;
-    if (a.state === "climb" || a.state === "climbwin" || a.state === "onwin" || a.state === "onstruct" || a.state === "ondraw" || a.state === "thrown" || (a.isPlayer && a.tz > 0.5) || (a.state === "gopaint" && a.tz > 0)) feetY = groundY - a.tz;
-    else if (a.jumping) feetY = groundY - Math.sin(a.jumpT * Math.PI) * 155;
-    // punctele tors/cap; când e aruncat se rotesc cu modelul (aceeași rotație ca tangle)
-    const ang = a.state === "thrown" ? a.tangle : 0, si = Math.sin(ang), co = Math.cos(ang);
-    const tX = a.x + 70 * si, tY = feetY - 70 * co;                        // tors
-    const hL = 100 + a.c.headR, hX = a.x + hL * si, hY = feetY - hL * co;  // cap
-    const d = Math.min(Math.hypot(tX - cx, tY - cy), Math.hypot(hX - cx, hY - cy));
+    if (a.away || !a.hit) continue;
+    const h = a.hit;
+    if (cx < h.x0 - HIT_PAD || cx > h.x1 + HIT_PAD || cy < h.y0 - HIT_PAD || cy > h.y1 + HIT_PAD) continue; // filtru rapid pe cutie
+    const d = hitDist(h, cx, cy);
     if (d < bestD) { bestD = d; best = a; }
   }
-  return (best && bestD < 90) ? best : null;
+  return (best && bestD < HIT_PAD) ? best : null;
 }
 
 // ---- interacțiune: click = lovitură, ține & trage = apucă și aruncă, dreapta = chat ----
@@ -2369,23 +2409,22 @@ function drawHitboxes() {
   ctx.strokeStyle = "#ffffff"; ctx.lineWidth = 1.5; ctx.globalAlpha = 0.85;
   ctx.fillStyle = "#fff"; ctx.font = "11px monospace"; ctx.textAlign = "center";
   for (const a of agents) {
-    if (a.away) continue;
-    const sleeping = a.state === "sleep" && a.lie > 0.3;
-    const half = sleeping ? 74 : 19;
-    const bodyH = sleeping ? 34 : (104 + 2 * a.c.headR);
-    let cx = a.x, baseY = groundY;
-    if (a.state === "held") { cx = pointer.x; baseY = Math.min(pointer.y, groundY); }
-    else if (a.state === "thrown") { baseY = groundY - a.tz; }
-    else if (a.state === "climb" || a.state === "onwin" || a.state === "onstruct" || a.state === "ondraw" || (a.state === "gopaint" && a.tz > 0)) { baseY = groundY - a.tz; }
-    else if (a.jumping) { baseY = groundY - Math.sin(a.jumpT * Math.PI) * 155; } // hitboxul sare cu modelul
-    if (a.state === "thrown") { // hitboxul se rotește cu modelul
-      ctx.save(); ctx.translate(cx, baseY); ctx.rotate(a.tangle);
-      ctx.strokeRect(-half, -bodyH, half * 2, bodyH); ctx.fillText(a.c.name, 0, -bodyH - 5);
-      ctx.restore();
-    } else {
-      ctx.strokeRect(cx - half, baseY - bodyH, half * 2, bodyH);
-      ctx.fillText(a.c.name, cx, baseY - bodyH - 5);
-    }
+    if (a.away || !a.hit) continue;
+    const h = a.hit;
+    // zona în care prinde click-ul: capsule fix pe oasele desenate (urmează orice poză)
+    ctx.globalAlpha = 0.16; ctx.strokeStyle = "#3ad1ff"; ctx.lineCap = "round"; ctx.lineWidth = HIT_PAD * 2;
+    ctx.beginPath();
+    for (const s of h.segs) { ctx.moveTo(s[0], s[1]); ctx.lineTo(s[2], s[3]); }
+    ctx.stroke();
+    for (const c of h.circles) { ctx.beginPath(); ctx.arc(c[0], c[1], c[2] + HIT_PAD, 0, Math.PI * 2); ctx.fillStyle = "#3ad1ff"; ctx.fill(); }
+    // oasele în sine + cutia lipită pe model
+    ctx.globalAlpha = 0.9; ctx.strokeStyle = "#3ad1ff"; ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (const s of h.segs) { ctx.moveTo(s[0], s[1]); ctx.lineTo(s[2], s[3]); }
+    ctx.stroke();
+    ctx.strokeStyle = "#ffffff"; ctx.lineWidth = 1.5;
+    ctx.strokeRect(h.x0, h.y0, h.x1 - h.x0, h.y1 - h.y0);
+    ctx.fillStyle = "#fff"; ctx.fillText(a.c.name, (h.x0 + h.x1) / 2, h.y0 - 5);
   }
   // coliziunea desenelor: cutia + suprafața de sus (galben) pe care aterizează stickmanii
   for (const d of drawings) {
