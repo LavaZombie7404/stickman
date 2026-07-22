@@ -503,8 +503,10 @@ hpanel.style.cssText = "position:fixed;top:50px;right:12px;z-index:60;width:298p
 hpanel.innerHTML = `<b style="color:#8ee6a0">🎮 Controalele tale</b><br>
 <b>R</b> — creează-ți personajul („TU")<br>
 <b>A / D</b> sau <b>← →</b> — mișcare<br>
-<b>Space</b> — salt (parkour pe desene!)<br>
-<b>Ctrl / Shift</b> — sprint (fugă)<br>
+<b>Space</b> — salt · în aer = double jump · pe perete = <b>wall-jump</b><br>
+<b>Shift</b> — dash (și în aer, unul per săritură)<br>
+<b>Ctrl</b> — sprint (fugă)<br>
+<i style="color:#9aa0b0">Ține A/D spre un perete (desen, casă, fereastră sau marginea<br>ecranului) ca să te agăți, apoi Space = wall-jump.</i><br>
 <b>T</b> — șterge-ți personajul
 <hr style="border:none;border-top:1px solid #333a55;margin:9px 0">
 <b style="color:#8ee6a0">🖱️ Cu mouse-ul</b><br>

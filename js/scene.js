@@ -671,12 +671,32 @@ class Agent {
     if (this.waterAnim > 0) this.waterAnim--;
     if (this.burning) { if (--this.burnTimer <= 0) { this.burning = false; this.burnCd = 120; } }
     else if (this.burnCd <= 0 && this.tz <= 0) { for (const s of structures) if (s.type === "campfire" && s.progress > 0.5 && !s.out && Math.abs(s.x - this.x) < 26) { this.burning = true; this.burnTimer = 300; break; } }
-    // mișcare orizontală (mers / sprint cu Ctrl-Shift)
+    // mișcare orizontală (mers / sprint cu Ctrl)
     const sprint = sprintHeld ? 1.9 : 1;
     let dir = 0;
     if (keys.has("a") || keys.has("arrowleft")) dir -= 1;
     if (keys.has("d") || keys.has("arrowright")) dir += 1;
-    if (dir) { this.face = dir; this.x += dir * this.speed * 2.4 * sprint; this.walkPhase += 0.16 * sprint; if (sprint > 1 && this.tz <= 0 && frame % 5 === 0) spawnDust(this.x, groundY, 2); }
+    // DASH (Shift): impuls orizontal scurt și plat; în aer ai unul singur — se reîncarcă la sol sau pe perete
+    if (this.ghosts === undefined) { this.ghosts = []; this.dashT = 0; this.dashCd = 0; this.dashDir = this.face; this.wallT = 0; this.wallSide = 0; this.kickVx = 0; this._airDash = 1; }
+    if (this.dashCd > 0) this.dashCd--;
+    const inAir = this.tz > 0.5 && !this.onPlat;
+    if (this.wantDash) {
+      this.wantDash = false;
+      if (this.dashT <= 0 && this.dashCd <= 0 && (!inAir || this._airDash > 0)) {
+        if (inAir) this._airDash--;
+        this.dashDir = dir || this.face; this.face = this.dashDir;
+        this.dashT = 12; this.dashCd = 30; this.wallT = 0; this.pzv = 0; this.kickVx = 0;
+        spawnDust(this.x - this.dashDir * 16, groundY - this.tz, 6);
+      }
+    }
+    if (this.dashT > 0) {
+      this.dashT--;
+      this.x += this.dashDir * (8 + 11 * (this.dashT / 12));   // pornire explozivă, se stinge lin
+      this.walkPhase += 0.1;
+      this.ghosts.push({ x: this.x, tz: this.tz, f: this.dashDir, a: 0.55 });
+    } else if (dir) { this.face = dir; this.x += dir * this.speed * 2.4 * sprint; this.walkPhase += 0.16 * sprint; if (sprint > 1 && this.tz <= 0 && frame % 5 === 0) spawnDust(this.x, groundY, 2); }
+    if (Math.abs(this.kickVx || 0) > 0.2) { this.x += this.kickVx; this.kickVx *= 0.88; } else this.kickVx = 0; // recul de la wall-jump
+    for (let i = this.ghosts.length - 1; i >= 0; i--) if ((this.ghosts[i].a -= 0.055) <= 0) this.ghosts.splice(i, 1);
     // PARKOUR: fizică verticală cu platforme = desenele din fundal + structurile (case/turnuri/copaci)
     const platOf = (ref) => {
       if (!ref) return null;
@@ -686,14 +706,39 @@ class Agent {
     };
     const cur = platOf(this.onPlat);
     const grounded = this.tz <= 0 || (cur && this.x >= cur.x0 && this.x <= cur.x1 && Math.abs(this.tz - cur.tz) < 3);
-    if (grounded) this._airJumps = 1; // pe sol/desen/structură → reîncarcă saltul din aer (double jump)
+    if (grounded) { this._airJumps = 1; this._airDash = 1; } // pe sol/desen/structură → reîncarcă saltul din aer + dash-ul
+    // PEREȚI: laturile desenelor / clădirilor / ferestrelor + marginile ecranului → te agăți și sari de pe ele
+    if (!grounded && this.dashT <= 0) {
+      const walls = [[-1e4, 60, 1e9, 0], [W - 60, 1e4, 1e9, 0]]; // marginile ecranului sunt și ele pereți
+      for (const d of drawings) walls.push([d.cx - d.s, d.cx + d.s, groundY - (d.cy - d.s), groundY - (d.cy + d.s)]);
+      for (const s of structures) { const b = structBox(s), base = s.by || groundY; walls.push([s.x - b.hw, s.x + b.hw, groundY - (base - b.h), groundY - base]); }
+      for (const w of standWindows()) walls.push([w.x, w.x + w.w, groundY - w.y, groundY - (w.y + w.h)]);
+      let side = 0;
+      for (const [x0, x1, tzTop, tzBot] of walls) {
+        if (this.tz > tzTop - 14 || this.tz < tzBot - 34) continue;                        // trebuie să fii lângă latura ei, nu deasupra
+        if (dir < 0 && this.x >= x1 - 22 && this.x <= x1 + 22) { side = -1; break; }       // perete în stânga
+        if (dir > 0 && this.x >= x0 - 22 && this.x <= x0 + 22) { side = 1; break; }        // perete în dreapta
+      }
+      if (side) {
+        this.wallSide = side; this.wallT = 7;                  // memorie scurtă (coyote-time pe perete)
+        if (this.pzv < -3.2) this.pzv = -3.2;                  // alunecă lent în loc să cadă
+        this.face = side; this._airJumps = 1; this._airDash = 1; // peretele îți reîncarcă saltul și dash-ul
+        if (frame % 5 === 0) spawnDust(this.x + side * 14, groundY - this.tz + 26, 1);
+      } else if (this.wallT > 0) this.wallT--;
+    } else this.wallT = 0;
     if (this.wantJump) {
       this.wantJump = false;
       if (grounded && this.jumpCd <= 0) { this.pzv = 13.5; this.jumpCd = 8; this.onPlat = null; this.squash = 1; spawnDust(this.x, groundY - this.tz, 4); }
+      else if (this.wallT > 0) { // WALL-JUMP: te împingi de perete în sus și în lateral
+        this.pzv = 13; this.kickVx = -this.wallSide * 11; this.face = -this.wallSide;
+        this.wallT = 0; this.onPlat = null; this.squash = 1; this._airJumps = 1; this._airDash = 1;
+        spawnDust(this.x + this.wallSide * 14, groundY - this.tz + 10, 7);
+        this.speak(pick(["Wall-jump! 🧗", "Fâș!", "Ninja!"]), 30);
+      }
       else if (this.tz > 0 && this._airJumps > 0) { this.pzv = 12.5; this._airJumps--; this.onPlat = null; this.squash = 1; spawnDust(this.x, groundY - this.tz, 4); this.speak(pick(["Hop! 🚀", "Din nou!", "Sus!"]), 30); } // DOUBLE JUMP în aer
     }
     const prevTz = this.tz;
-    this.pzv = (this.pzv || 0) - 0.9;                          // gravitație
+    this.pzv = this.dashT > 0 ? 0 : (this.pzv || 0) - 0.9;     // gravitație (dash-ul o suspendă cât ține)
     this.tz += this.pzv;
     if (this.pzv <= 0) {                                       // coboară → aterizează pe cea mai înaltă platformă de sub picioare
       let bestTz = -1, best = null;
@@ -779,6 +824,24 @@ class Agent {
     if (this.away) return;
     const c = this.c;
 
+    // urme de dash (afterimages) — siluetă simplă în pozițiile prin care tocmai a trecut
+    if (this.ghosts && this.ghosts.length) {
+      ctx.save(); ctx.strokeStyle = c.color; ctx.lineWidth = 3.5; ctx.lineCap = "round"; ctx.lineJoin = "round";
+      for (const g of this.ghosts) {
+        const y = groundY - g.tz, f = g.f;
+        ctx.globalAlpha = g.a * 0.5;
+        ctx.beginPath(); ctx.arc(g.x, y - 104 - NECK - c.headR, c.headR * 0.92, 0, Math.PI * 2); ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(g.x, y + HIP_Y); ctx.lineTo(g.x, y + SHOULDER_Y);                                              // corp
+        ctx.moveTo(g.x, y + HIP_Y); ctx.lineTo(g.x - f * 20, y + HIP_Y + 20); ctx.lineTo(g.x - f * 36, y + HIP_Y + 12); // picioare întinse în urmă
+        ctx.moveTo(g.x, y + HIP_Y); ctx.lineTo(g.x - f * 16, y + HIP_Y + 26); ctx.lineTo(g.x - f * 32, y + HIP_Y + 24);
+        ctx.moveTo(g.x, y + SHOULDER_Y + 4); ctx.lineTo(g.x + f * 16, y + SHOULDER_Y - 2); ctx.lineTo(g.x + f * 30, y + SHOULDER_Y - 6); // braț în față
+        ctx.moveTo(g.x, y + SHOULDER_Y + 4); ctx.lineTo(g.x - f * 16, y + SHOULDER_Y + 10); ctx.lineTo(g.x - f * 30, y + SHOULDER_Y + 14);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+
     // origine + transformări în funcție de stare
     ctx.save();
     // orientare LINĂ: se întoarce smooth (scaleX trece prin 0) în loc de flip instant
@@ -824,6 +887,8 @@ class Agent {
     const winClimbHang = st === "climbwin" && this.climbPhase === "hang";
     const structMove = st === "onstruct" && (this.osPhase === "up" || this.osPhase === "fall");
     const climbMove = st === "climb" && this.climbPhase !== "go"; // în faza "go" merge normal spre desen (nu ține mâinile sus tot drumul)
+    const dashing = this.dashT > 0;                               // dash: corp întins, membre în urmă
+    const clinging = this.wallT > 0 && this.tz > 0.5;             // agățat de perete (wall-slide)
     const hanging = climbMove || gpClimb || winClimbMove || winClimbHang || structMove;
     const painting = (st === "draw") || (st === "gopaint" && this.gpPhase === "draw");
     const walking = (st === "walk" || st === "run" || st === "fight" || st === "leaving" || st === "scared" || (st === "watch" && !this.watchArrived) || (st === "gopaint" && this.gpPhase === "go") || (st === "climb" && this.climbPhase === "go") || (st === "climbwin" && this.climbPhase === "go") || (st === "sleep" && this.sleepPhase === "goto") || (st === "onwin" && this.onWinVX) || (st === "ondraw" && this.onDrawVX) || (st === "getweapon" && this._admire === undefined) || (st === "onstruct" && this.osPhase === "go") || (st === "onstruct" && this.osPhase === "stand" && this.osVX));
@@ -857,6 +922,12 @@ class Agent {
       const sp = Math.sin(this.tangle * 2) * 10;
       this.legIK(ctx, -3, hipY, -20 + sp, hipY + 40, -1);
       this.legIK(ctx, 3, hipY, 22 + sp, hipY + 40, -1);
+    } else if (dashing) {
+      for (const side of [-1, 1]) { const hx = side * 3; ctx.beginPath(); ctx.moveTo(hx, hipY); ctx.lineTo(hx - 18, hipY + 18 + side * 5); ctx.lineTo(hx - 36, hipY + 10 + side * 9); ctx.stroke(); } // picioare întinse în urmă
+    } else if (clinging) {
+      const sw = Math.sin(this.bob * 2) * 3;
+      this.legIK(ctx, -3, hipY, 8 + sw, hipY + 44, -1);   // picioare sprijinite/îndoite pe perete
+      this.legIK(ctx, 3, hipY, 19 + sw, hipY + 28, -1);
     } else if (this.jumping) {
       for (const side of [-1, 1]) { const hx = side * 3; ctx.beginPath(); ctx.moveTo(hx, hipY); ctx.lineTo(hx + side * 12, hipY + 14); ctx.lineTo(hx + side * 4, hipY - 2); ctx.stroke(); }
     } else if (striking && this.attackType === "kick") {
@@ -889,6 +960,11 @@ class Agent {
     } else if (st === "thrown") {
       const s = Math.sin(this.tangle * 2) * 10;
       seg(-18 + s, 6, -32 + s, -2); seg(18 + s, 6, 32 + s, -2);
+    } else if (dashing) {
+      seg(18, -8, 33, -12); seg(-16, 6, -30, 12);   // un braț taie aerul în față, celălalt rămâne în urmă
+    } else if (clinging) {
+      const w = Math.sin(this.bob * 3) * 3;
+      seg(12, -22, 17 + w, -38); seg(10, 8, 16 + w, 20); // o mână agățată sus de perete, una jos
     } else if (this.jumping) {
       seg(14, -12, 24, -26); seg(-14, -12, -24, -26);
     } else if (this.waveTimer > 0) {
@@ -2280,12 +2356,13 @@ window.addEventListener("keydown", (e) => {
   if (k === "t") { removePlayers(); return; }
   if (k === "h") { showHitboxes = !showHitboxes; return; }
   if (k === "g") { fxLevel = fxLevel < 0.05 ? 0.1 : (fxLevel < 0.2 ? 0.35 : (fxLevel < 0.6 ? 0.7 : 0)); return; } // intensitate shader WebGL
-  if (k === " " || k === "spacebar") { if (player && !e.repeat) player.wantJump = true; e.preventDefault(); return; } // Space = salt; a doua apăsare în aer = double jump
-  sprintHeld = e.ctrlKey || e.shiftKey; // Ctrl/Shift ținut = fugă (sprint)
-  if (k === "control" || k === "shift") { e.preventDefault(); return; }
+  if (k === " " || k === "spacebar") { if (player && !e.repeat) player.wantJump = true; e.preventDefault(); return; } // Space = salt; în aer = double jump; pe perete = wall-jump
+  if (k === "shift") { if (player && !e.repeat) player.wantDash = true; e.preventDefault(); return; }                 // Shift = dash
+  sprintHeld = e.ctrlKey; // Ctrl ținut = fugă (sprint)
+  if (k === "control") { e.preventDefault(); return; }
   if (k === "a" || k === "d" || k === "arrowleft" || k === "arrowright") { keys.add(k); if (k.startsWith("arrow") || e.ctrlKey) e.preventDefault(); } // preventDefault la Ctrl+A/D ca să nu declanșeze scurtături de browser
 });
-window.addEventListener("keyup", (e) => { keys.delete(e.key.toLowerCase()); sprintHeld = e.ctrlKey || e.shiftKey; });
+window.addEventListener("keyup", (e) => { keys.delete(e.key.toLowerCase()); sprintHeld = e.ctrlKey; });
 window.addEventListener("blur", () => { keys.clear(); sprintHeld = false; }); // pierde focusul → nu rămâne blocat pe sprint/mers
 function drawHitboxes() {
   ctx.save();
