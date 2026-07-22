@@ -126,6 +126,15 @@ elForm.addEventListener("submit", async (e) => {
   if (req) {
     const who = current, icon = req.mode === "build" ? "🔨" : "🎨";
     const done = (r) => { addMsg("bot", r); histories[c.id].push({ role: "assistant", content: r }); };
+    // cu cheie AI: Claude desenează planul EXACT după descrierea ta („un castel roșu cu 3 turnuri")
+    if (req.mode === "build" && hasKey()) {
+      const t1 = addMsg("bot typing", "📐 fac planul…");
+      try {
+        const plan = await claudeBuildPlan(req.what);
+        t1.remove();
+        if (window.stickBuildPlan && window.stickBuildPlan(who, req.what, plan)) { done("Îl construiesc acum! " + icon); return; }
+      } catch (err) { t1.remove(); }
+    }
     if (window.stickBuild && window.stickBuild(who, req.what, req.mode)) { done((req.mode === "build" ? "Îl construiesc acum! " : "Îl desenez acum! ") + icon); return; }
     if (hasKey()) {   // nu-l știe din bibliotecă → îi cere lui Claude conturul obiectului
       const t2 = addMsg("bot typing", icon + (req.mode === "build" ? " proiectez…" : " desenez…"));
@@ -169,6 +178,34 @@ function buildRequest(msg) {
   // „desenează" → desen pe fundal; „construiește / ridică / fă" → construcție din blocuri
   const mode = /^desen/.test(m[1]) ? "draw" : "build";
   return { what, mode };
+}
+
+// Cere lui Claude PLANUL de construcție: o hartă de blocuri (ca un plan de zidar), rând cu rând.
+// Așa stickmanul ridică fix ce ai descris tu, cu materialele și culorile din descriere.
+async function claudeBuildPlan(what) {
+  const system = "Ești arhitect într-un joc 2D cu stick-figures, stil Minecraft. Primești descrierea unei " +
+    "construcții și întorci DOAR JSON, fără text în jur, fără markdown:\n" +
+    '{"name":"nume scurt","palette":{"A":"#rrggbb","B":"#rrggbb"},"rows":["  AAA  ","AAABAAA"]}\n' +
+    "REGULI:\n" +
+    "- \"rows\" e construcția văzută din față, ca un desen ASCII: PRIMUL rând e vârful, ULTIMUL rând e baza (stă pe pământ).\n" +
+    "- Fiecare caracter e un bloc. Spațiul = gol (aer). Toate rândurile au ACEEAȘI lungime, completate cu spații.\n" +
+    "- Maximum 20 de rânduri și maximum 24 de coloane. Minimum 5 rânduri. Folosește bine spațiul, fă-o recognoscibilă.\n" +
+    "- Fiecare literă din rows trebuie să existe în \"palette\", cu o culoare hex plauzibilă pentru materialul ei " +
+    "(piatră gri, lemn maro, geam albastru deschis, acoperiș roșu, frunze verzi…).\n" +
+    "- Respectă EXACT detaliile cerute: culori, număr de turnuri/etaje/ferestre, formă, materiale.\n" +
+    "- Ultimul rând trebuie să aibă blocuri (construcția se sprijină pe pământ), fără să plutească.\n" +
+    "- Adaugă detalii cu alte litere: uși, ferestre, steaguri, ornamente.";
+  const res = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-api-key": apiKey(), "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
+    body: JSON.stringify({ model: MODEL, max_tokens: 1600, system, messages: [{ role: "user", content: String(what).slice(0, 160) }] }),
+  });
+  if (!res.ok) throw new Error(res.status);
+  const data = await res.json();
+  const txt = ((data.content || []).find(b => b.type === "text") || {}).text || "";
+  const m = txt.match(/\{[\s\S]*\}/);
+  if (!m) throw new Error("fara json");
+  return JSON.parse(m[0]);
 }
 
 // Cere lui Claude conturul obiectului ca linii într-un pătrat -1..1 → stickmanul îl desenează exact.

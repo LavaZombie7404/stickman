@@ -248,6 +248,7 @@ class Agent {
     this.sleepCd = rand(3600, 18000);
     this.chatting = false;
     this.building = null;
+    this.buildJob = null;   // construcția cerută de tine: o duce la capăt chiar dacă e întrerupt
     this.buildTimer = 0;
     this.buildDur = 0;
     this.builtCount = 0;
@@ -671,6 +672,20 @@ class Agent {
       if (near && fast) { this.startle = 22; this.face = dxm >= 0 ? 1 : -1; this.speak("!", 40); }
     }
 
+    // ce ai CERUT tu se termină, chiar dacă a fost întrerupt între timp (bătaie, sperietură, armă…)
+    if (this.buildJob && (this.state === "walk" || this.state === "idle")) {
+      if (!structures.includes(this.buildJob) || this.buildJob.progress >= 1) this.buildJob = null;
+      else if (!this.opponent && !this.burning) {
+        const s = this.buildJob;
+        this.building = s; this.state = "build"; this.targetX = null;
+        this.buildDur = clamp((s.cells ? s.cells.length * 6 : 340), 220, 900);
+        this.buildTimer = this.buildDur * (1 - s.progress);   // reia de unde a rămas, nu de la zero
+        this.buildPhase = "go"; this.buildWalk = 260;
+        this.buildGoX = clamp(s.x - Math.sign(s.x - this.x || 1) * (structBox(s).hw + 26), 40, W - 40);
+        this.speak("Înapoi la treabă! 🔨", 90);
+      }
+    }
+
     // ---- mașină de stări ----
     if (this.state === "hit") {
       this.x += this.vx; this.vx *= 0.9;
@@ -706,11 +721,25 @@ class Agent {
         if (!this.say && Math.random() < 0.03) this.speak(pick(["Aaah!", "Nu mă prinde!", "Ferește!"]), 40);
       }
     }
+    else if (this.state === "build" && this.buildPhase === "go") {
+      // întâi se duce la șantier, abia apoi pune primul bloc (nu mai construiește de la distanță)
+      const dx = this.buildGoX - this.x;
+      if (Math.abs(dx) > 6 && --this.buildWalk > 0) {
+        const step = Math.sign(dx) * this.speed * 1.8;
+        this.face = dx >= 0 ? 1 : -1;
+        if (!this.wouldCollide(this.x + step)) { this.x += step; this.walkPhase += 0.14; }
+        else this.buildWalk = 0;   // ceva îi stă în cale → se apucă de treabă de unde e
+      } else {
+        this.buildPhase = null;
+        this.walkPhase = Math.round(this.walkPhase / Math.PI) * Math.PI;   // termină pasul, nu îngheață în aer
+        if (this.building) this.face = this.building.x >= this.x ? 1 : -1;
+      }
+    }
     else if (this.state === "build") {
       if (this.building) this.building.progress = Math.min(1, 1 - this.buildTimer / this.buildDur);
       if (--this.buildTimer <= 0) {
         if (this.building) this.building.progress = 1;
-        this.building = null; this.state = "idle"; this.targetX = null; this.stateTimer = rand(60, 140);
+        this.building = null; this.buildJob = null; this.state = "idle"; this.targetX = null; this.stateTimer = rand(60, 140);
         this.speak(pick(["Gata!", "Frumoasă!", "Casa mea! 🏠"]), 100);
       }
     }
@@ -930,7 +959,7 @@ class Agent {
             this._wpT = weapons.find(s => !s.taken); this.state = "getweapon"; this.targetX = null; this.speak(pick(["O armă!", "A mea!", "Hei!"]), 80);
           } else if (r < 0.012 && this.builtCount < 2 && structures.length < 8) {
             const type = pick(["house", "tower", "tree", "campfire"]);
-            this.state = "build"; this.buildDur = rand(340, 480); this.buildTimer = this.buildDur;
+            this.state = "build"; this.buildPhase = null; this.buildDur = rand(340, 480); this.buildTimer = this.buildDur;
             const s = { x: this.x, color: this.c.color, progress: 0, type }; structures.push(s); this.building = s; this.builtCount++;
             const m = { house: ["Construiesc!", "O casă!"], tower: ["Un turn!", "Sus!"], tree: ["Un copac!", "Verde!"], campfire: ["Un foc!", "Cald!"] };
             this.speak(pick(m[type]), 120);
@@ -2179,21 +2208,137 @@ function rasterizeShape(norm, cols) {
   }
   return cells;
 }
-function makeBlockStructure(x, norm, color, name) {
+function makeBlockStructure(x, norm, color, name, scale) {
   const cells = rasterizeShape(norm, BUILD_COLS);
   if (cells.length < 6) return null;
   let top = 0, bottom = 1e9;
   for (const c of cells) { if (c[1] > top) top = c[1]; if (c[1] < bottom) bottom = c[1]; }
   const shifted = cells.map(c => [c[0], c[1] - bottom, c[2]]);   // lipit de pământ
-  return { x, color, progress: 0, type: "custom", cells: shifted, rows: top - bottom + 1, cols: BUILD_COLS, scale: 0.7, name: name || "" };
+  return { x, color, progress: 0, type: "custom", cells: shifted, rows: top - bottom + 1, cols: BUILD_COLS, scale: 0.7 * (scale || 1), name: name || "" };
+}
+// ---- PLANURI DE CONSTRUCȚIE ----
+// Un plan e o hartă de blocuri: fiecare rând = un rând de zidărie (de sus în jos),
+// fiecare literă = o culoare din paletă, spațiul = gol. Le folosim și pentru
+// planurile venite de la Claude, deci ce descrii tu se ridică exact așa.
+const P_ROCK = "#9aa0a6", P_DARK = "#6f757b", P_WOOD = "#8a5f39", P_GLASS = "#5fa8d3";
+const P_ROOF = "#b0392b", P_WHITE = "#e9ecef", P_SAND = "#d9b96b", P_WATER = "#2e86c1";
+const BLUEPRINTS = {
+  castel: {
+    k: ["castel", "cetate", "fortareata", "fortăreață", "citadela", "citadelă"],
+    pal: { D: P_DARK, S: P_ROCK, G: P_GLASS, W: P_WOOD },
+    rows: ["D D       D D", "DDD       DDD", "DGD       DGD", "DDDS S S SDDD", "DDDSSSSSSSDDD",
+           "DDDSSGSGSSDDD", "DDDSSSSSSSDDD", "DGDSSWWWSSDDD", "DDDSSWWWSSDDD", "DDDSSWWWSSDDD"],
+  },
+  far: {
+    k: ["far", "farul"],
+    pal: { R: P_ROOF, Y: "#f2c14e", W: P_WHITE, D: P_WOOD },
+    rows: ["  RRR  ", " RRRRR ", "  YYY  ", "  WWW  ", "  RRR  ", "  WWW  ", " RRRRR ",
+           " WWWWW ", " RRRRR ", " WWWWW ", "WWWWWWW", "WWWDWWW", "WWWDWWW"],
+  },
+  pod: {
+    k: ["pod", "podul", "viaduct"],
+    pal: { R: P_WOOD, S: P_ROCK },
+    rows: ["R R R R R R R R", "SSSSSSSSSSSSSSS", "SSSS       SSSS", "SSS         SSS",
+           "SSS         SSS", "SSS         SSS", "SSS         SSS"],
+  },
+  piramida: {
+    k: ["piramida", "piramidă", "piramide"],
+    pal: { Y: P_SAND, D: "#6b5327" },
+    rows: ["       Y       ", "      YYY      ", "     YYYYY     ", "    YYYYYYY    ",
+           "   YYYYYYYYY   ", "  YYYYYYYYYYY  ", " YYYYYYDYYYYYY ", "YYYYYYYDYYYYYYY"],
+  },
+  fantana: {
+    k: ["fantana", "fântână", "fantani", "put", "puț", "izvor"],
+    pal: { R: P_ROOF, P: P_WOOD, S: P_ROCK, B: P_WATER },
+    rows: [" RRRRR ", "RRRRRRR", "P     P", "P     P", "SBBBBBS", "SSSSSSS"],
+  },
+  moara: {
+    k: ["moara", "moară", "mori"],
+    pal: { B: P_WHITE, H: "#4a4f55", W: P_WOOD, G: P_GLASS, D: "#5a3d24" },
+    rows: ["B         B", " B       B ", "  B  H  B  ", " B       B ", "B         B",
+           "   WWWWW   ", "   WWWWW   ", "  WWWWWWW  ", "  WWGWGWW  ", "  WWWWWWW  ",
+           " WWWWWWWWW ", " WWWDDDWWW "],
+  },
+  zid: {
+    k: ["zid", "gard", "bariera", "barieră", "meterez"],
+    pal: { S: P_ROCK },
+    rows: ["S S S S S S S S", "SSSSSSSSSSSSSSS", "SSSSSSSSSSSSSSS", "SSSSSSSSSSSSSSS", "SSSSSSSSSSSSSSS"],
+  },
+  scara: {
+    k: ["scara", "scară", "scari", "trepte", "treapta"],
+    pal: { W: P_WOOD },
+    rows: ["        WW", "      WWWW", "    WWWWWW", "  WWWWWWWW", "WWWWWWWWWW"],
+  },
+  racheta: {
+    k: ["racheta", "rachetă", "rachete", "naveta", "navetă"],
+    pal: { R: P_ROOF, W: P_WHITE, G: P_GLASS },
+    rows: ["    R    ", "   RRR   ", "  WWWWW  ", "  WWGWW  ", "  WWGWW  ", "  WWWWW  ",
+           "  WRRRW  ", "  WWWWW  ", " RWWWWWR ", "RRWWWWWRR", " R WWW R ", " R WWW R "],
+  },
+};
+function findBlueprint(text) {
+  const t = String(text || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
+  for (const id in BLUEPRINTS) for (const k of BLUEPRINTS[id].k) {
+    const kk = k.normalize("NFD").replace(/[̀-ͯ]/g, "");
+    if (new RegExp("(^|[^a-z])" + kk + "([^a-z]|$)").test(t)) return id;
+  }
+  return null;
+}
+// „#abc" → „#aabbcc"; orice altceva neconform → null (planul venit de la AI poate fi oricum)
+function normHex(v) {
+  const s = String(v || "").trim();
+  if (/^#[0-9a-fA-F]{6}$/.test(s)) return s;
+  if (/^#[0-9a-fA-F]{3}$/.test(s)) return "#" + s[1] + s[1] + s[2] + s[2] + s[3] + s[3];
+  return null;
+}
+// hartă de litere → blocuri gata de ridicat (x centrat, y de jos în sus, lipit de pământ)
+function structureFromPlan(rows, pal, fallback, name, scale) {
+  const clean = (rows || []).map(r => String(r)).filter(r => r.length);
+  if (!clean.length || clean.length > 22) return null;
+  const wide = Math.max(...clean.map(r => r.length));
+  if (wide > 26) return null;
+  const map = {};   // paleta, tolerantă la litere mari/mici (AI-ul mai scapă „a" în loc de „A")
+  for (const k in (pal || {})) { const h = normHex(pal[k]); if (h) { map[k] = h; map[k.toLowerCase()] = map[k.toLowerCase()] || h; map[k.toUpperCase()] = map[k.toUpperCase()] || h; } }
+  const cells = [];
+  for (let r = 0; r < clean.length; r++) for (let c = 0; c < clean[r].length; c++) {
+    const ch = clean[r][c];
+    if (ch === " " || ch === "." || ch === "_" || ch === "0") continue;
+    const col = map[ch] || fallback;
+    cells.push([c - (wide - 1) / 2, clean.length - 1 - r, col]);
+  }
+  if (cells.length < 6) return null;
+  let bottom = 1e9, top = 0;
+  for (const c of cells) { if (c[1] < bottom) bottom = c[1]; if (c[1] > top) top = c[1]; }
+  for (const c of cells) c[1] -= bottom;
+  return { x: 0, color: fallback, progress: 0, type: "custom", cells, rows: top - bottom + 1, scale: scale || 1, name: name || "" };
+}
+// „un castel URIAȘ ROȘU" → și mărimea, și culoarea din descriere ajung în construcție
+const SIZE_WORDS = [[/urias|gigant|imens|enorm|masiv/, 1.45], [/mare|inalt|mari/, 1.2], [/mic|micut|scund|mini/, 0.7]];
+const COLOR_WORDS = { rosu: "#CC0000", roz: "#ff7bac", albastru: "#33CCFF", verde: "#66CC00", galben: "#FFCC00", portocaliu: "#FF6600", mov: "#980098", violet: "#980098", negru: "#3a3f4a", alb: "#e9ecef", maro: "#8a5f39", gri: "#9aa0a6", auriu: "#f2c14e" };
+function sizeFromText(text) {
+  const t = String(text || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
+  for (const [re, sc] of SIZE_WORDS) if (re.test(t)) return sc;
+  return 1;
+}
+function colorFromText(text) {
+  const t = String(text || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
+  for (const w in COLOR_WORDS) if (new RegExp("(^|[^a-z])" + w + "([a-z]{0,3})([^a-z]|$)").test(t)) return COLOR_WORDS[w];
+  return null;
 }
 // API pentru chat. mode: "build" = construcție din blocuri, "draw" = desen pe fundal.
 window.stickBuild = function (agent, text, mode) {
   if (!agent || agent.away || agent.state === "dead") return false;
+  if (mode === "build") {
+    const bp = findBlueprint(text);   // are plan dedicat (castel, far, pod…) → îl ridică exact
+    if (bp) {
+      const s = structureFromPlan(BLUEPRINTS[bp].rows, BLUEPRINTS[bp].pal, agent.c.color, bp, sizeFromText(text));
+      if (s) { agent.chatting = false; return beginBuild(agent, s, bp); }
+    }
+  }
   const id = findShape(text);
   if (!id) return false;
   agent.chatting = false;
-  if (mode === "build") return startBuilding(agent, SHAPES[id].s, id);
+  if (mode === "build") return startBuilding(agent, SHAPES[id].s, id, text);
   const spot = doodleSpot(agent) || { cx: clamp(agent.x + 60, 90, W - 90), cy: groundY - 260, s: 40 };
   spot.s = Math.max(spot.s, 42);
   agent.startDoodle(spot, doodleFromStrokes(SHAPES[id].s, spot.cx, spot.cy, spot.s, agent.c.color));
@@ -2209,24 +2354,49 @@ window.stickDrawStrokes = function (agent, name, norm, mode) {
     .filter(st => st.length > 1);
   if (!clean.length) return false;
   agent.chatting = false;
-  if (mode === "build") return startBuilding(agent, clean, name);
+  if (mode === "build") return startBuilding(agent, clean, name, name);
   const spot = doodleSpot(agent) || { cx: clamp(agent.x + 60, 90, W - 90), cy: groundY - 260, s: 44 };
   spot.s = Math.max(spot.s, 44);
   agent.startDoodle(spot, doodleFromStrokes(clean, spot.cx, spot.cy, spot.s, agent.c.color));
   agent.speak("Uite: " + name + " 🎨", 130);
   return true;
 };
-// pornește șantierul: caută un loc liber lângă el și ridică obiectul bloc cu bloc
-function startBuilding(agent, norm, name) {
-  const nat = { casa: "house", turn: "tower", copac: "tree", foc: "campfire" }[name];   // astea au deja model dedicat
-  let x = clamp(agent.x + (agent.face >= 0 ? 130 : -130), 110, W - 110);
-  for (let k = 0; k < 12 && structures.some(s => Math.abs(s.x - x) < structBox(s).hw + 90); k++) x = clamp(x + 70, 110, W - 110);
-  const s = nat ? { x, color: agent.c.color, progress: 0, type: nat } : makeBlockStructure(x, norm, agent.c.color, name);
+// API pentru chat cu AI: plan de blocuri gândit de Claude pentru EXACT ce ai descris
+window.stickBuildPlan = function (agent, name, plan) {
+  if (!agent || agent.away || agent.state === "dead" || !plan || !Array.isArray(plan.rows)) return false;
+  const s = structureFromPlan(plan.rows, plan.palette, colorFromText(name) || agent.c.color, plan.name || name, sizeFromText(name));
   if (!s) return false;
+  agent.chatting = false;
+  return beginBuild(agent, s, plan.name || name);
+};
+// contur → blocuri (fallback offline pentru orice formă din bibliotecă)
+function startBuilding(agent, norm, name, text) {
+  const nat = { casa: "house", turn: "tower", copac: "tree", foc: "campfire" }[name];   // astea au deja model dedicat
+  const s = nat ? { x: 0, color: colorFromText(text) || agent.c.color, progress: 0, type: nat, scale: sizeFromText(text) }
+                : makeBlockStructure(0, norm, colorFromText(text) || agent.c.color, name, sizeFromText(text));
+  if (!s) return false;
+  return beginBuild(agent, s, name);
+}
+// pornește șantierul: alege un loc liber, îl trimite acolo, apoi ridică bloc cu bloc
+function beginBuild(agent, s, name) {
+  const hw = structBox(s).hw;
+  // cât de departe e poziția x de cea mai apropiată construcție (negativ = se suprapun)
+  const gapAt = (x) => structures.reduce((g, o) => Math.min(g, Math.abs(o.x - x) - structBox(o).hw - hw - 20), 1e9);
+  let x = clamp(agent.x + (agent.face >= 0 ? 1 : -1) * (hw + 70), hw + 20, W - hw - 20);
+  let best = x, bestGap = gapAt(x);
+  for (let k = 0; k < 14 && bestGap < 0; k++) {
+    x = clamp(x + (hw + 60), hw + 20, W - hw - 20);
+    if (x >= W - hw - 22) x = hw + 20;   // s-a lovit de marginea din dreapta → caută de la stânga
+    const g = gapAt(x);
+    if (g > bestGap) { bestGap = g; best = x; }
+  }
+  s.x = best;   // dacă e plin, alege măcar locul cel mai puțin înghesuit
   if (structures.length >= 10) structures.shift();
   structures.push(s);
-  agent.building = s; agent.state = "build"; agent.targetX = null;
-  agent.buildDur = Math.max(200, (s.cells ? s.cells.length * 7 : 340)); agent.buildTimer = agent.buildDur;
+  agent.building = s; agent.buildJob = s; agent.targetX = null; agent.state = "build";
+  agent.buildPhase = "go"; agent.buildWalk = 260;   // are 260 cadre să ajungă, apoi se apucă oricum
+  agent.buildGoX = clamp(x - Math.sign(x - agent.x || 1) * (hw + 26), 40, W - 40);
+  agent.buildDur = clamp((s.cells ? s.cells.length * 6 : 340), 220, 900); agent.buildTimer = agent.buildDur;
   agent.face = x >= agent.x ? 1 : -1;
   agent.speak("Construiesc " + (name || "ceva") + "! 🔨", 140);
   return true;
@@ -2752,7 +2922,7 @@ function triggerBuild() {
   const cands = agents.filter(x => !x.isPlayer && (x.state === "walk" || x.state === "idle") && x.builtCount < 2);
   if (!cands.length || structures.length >= 8) return;
   const a = pick(cands), type = pick(["house", "tower", "tree", "campfire"]);
-  a.state = "build"; a.buildDur = rand(340, 480); a.buildTimer = a.buildDur;
+  a.state = "build"; a.buildPhase = null; a.buildDur = rand(340, 480); a.buildTimer = a.buildDur;
   const s = { x: a.x, color: a.c.color, progress: 0, type }; structures.push(s); a.building = s; a.builtCount++;
   a.speak(pick(["Construiesc!", "Minecraft!"]), 120);
 }
@@ -3197,9 +3367,11 @@ function drawStructure(s) {
 
   if (s.type === "custom") {   // ce i-ai cerut tu, ridicat rând cu rând din blocuri
     const shown = Math.ceil(p * s.rows);
-    for (const [cx, cy, edge] of s.cells) {
+    for (const [cx, cy, tone] of s.cells) {
       if (cy >= shown) continue;
-      put(cx, cy, shade(col, edge ? 1 : (((cx + cy) & 1) ? 0.6 : 0.44)));   // contur/detalii deschise, umplutura inchisa
+      // tone = culoare proprie (plan de construcție) sau 1/0 = contur/umplutură (contur rasterizat)
+      if (typeof tone === "string") put(cx, cy, shade(tone, ((cx + cy) & 1) ? 1 : 0.84));   // damier ușor = textură de zidărie
+      else put(cx, cy, shade(col, tone ? 1 : (((cx + cy) & 1) ? 0.6 : 0.44)));              // contur/detalii deschise, umplutura inchisa
     }
     if (p < 1) {   // rândul care se pune ACUM clipește (se vede că lucrează)
       const r = shown - 1;
