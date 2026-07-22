@@ -6,6 +6,7 @@ const LS_KEY = "stickfigures_anthropic_key";
 const histories = {}; // per character id
 let current = null;    // agentul cu care vorbești
 
+const onTouch = matchMedia("(pointer: coarse)").matches || "ontouchstart" in window;  // telefon/tabletă: alt text pe butoane, alt panou de ajutor
 const apiKey = () => (localStorage.getItem(LS_KEY) || "").trim();
 const hasKey = () => apiKey().length > 10;
 
@@ -364,7 +365,7 @@ function scriptedReply(c, msg) {
 // ================= CHAT DE GRUP (vorbește cu toți) =================
 const gbtn = document.createElement("button");
 gbtn.id = "groupBtn";
-gbtn.textContent = "💬 Vorbește cu toți";
+gbtn.textContent = onTouch ? "💬 Toți" : "💬 Vorbește cu toți";   // pe telefon nu e loc de titluri lungi
 document.body.appendChild(gbtn);
 
 const gpanel = document.createElement("div");
@@ -380,6 +381,19 @@ gpanel.innerHTML = `
   <form class="chat-form"><input type="text" placeholder="Scrie tuturor..." autocomplete="off"/><button type="submit">➤</button></form>
 `;
 document.body.appendChild(gpanel);
+
+// Telefon: când se deschide tastatura, ferestrele de chat urcă deasupra ei
+// (altfel scrii „construiește-mi un castel" într-un câmp pe care nu-l vezi).
+if (onTouch && window.visualViewport) {
+  const vv = window.visualViewport;
+  const lift = () => {
+    const gap = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+    const b = gap > 60 ? gap + 8 + "px" : "";   // >60px ascuns = tastatura e pe ecran
+    panel.style.bottom = b; gpanel.style.bottom = b;
+  };
+  vv.addEventListener("resize", lift);
+  vv.addEventListener("scroll", lift);
+}
 
 const gLog = gpanel.querySelector(".chat-log");
 const gForm = gpanel.querySelector(".chat-form");
@@ -440,7 +454,7 @@ gForm.addEventListener("submit", async (e) => {
 
 // ================= BUTON EXPEDIȚIA =================
 const ebtn = document.createElement("button");
-ebtn.id = "expedBtn"; ebtn.textContent = "🗺️ Expediția";
+ebtn.id = "expedBtn"; ebtn.textContent = onTouch ? "🗺️ Expediție" : "🗺️ Expediția";
 document.body.appendChild(ebtn);
 
 const epanel = document.createElement("div");
@@ -589,12 +603,26 @@ ebtn.addEventListener("click", () => {
 
 // ================= AJUTOR: CONTROALE (❔) =================
 const hbtn = document.createElement("button");
-hbtn.textContent = "❔ Taste";
+hbtn.textContent = onTouch ? "❔ Cum se joacă" : "❔ Taste";
 hbtn.style.cssText = "position:fixed;top:10px;right:12px;z-index:60;background:#1e2130;color:#cdd3ff;border:1px solid #3a3f5a;border-radius:9px;padding:7px 13px;font:600 13px 'Segoe UI',sans-serif;cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,0.4);";
 document.body.appendChild(hbtn);
 const hpanel = document.createElement("div");
 hpanel.style.cssText = "position:fixed;top:50px;right:12px;z-index:60;width:298px;background:rgba(18,20,32,0.97);color:#dfe3f5;border:1px solid #3a3f5a;border-radius:12px;padding:14px 16px;font:13px 'Segoe UI',sans-serif;line-height:1.75;box-shadow:0 10px 34px rgba(0,0,0,0.55);display:none;";
-hpanel.innerHTML = `<b style="color:#8ee6a0">🎮 Controalele tale</b><br>
+hpanel.innerHTML = onTouch ? `<b style="color:#8ee6a0">📱 Cu degetul</b><br>
+<b>Atingere</b> pe stickman — îl lovești (de două ori = provocare)<br>
+<b>Ține apăsat</b> pe stickman — <b>chat</b> cu el<br>
+<b>Trage</b> un stickman — îl ridici și-l arunci<br>
+<b>Atingere</b> pe o construcție — o distrugi (trage = o muți)<br>
+<b>Atingere</b> în aer — pui un desen (platformă de sărit)<br>
+<i style="color:#9aa0b0">In chat: „construiește-mi o rachetă" → o ridică din blocuri<br>(te poți urca pe ea). „Desenează un robot" → o face desen.<br>Cu cheia Claude poate face ORICE îi ceri.</i>
+<hr style="border:none;border-top:1px solid #333a55;margin:9px 0">
+<b style="color:#8ee6a0">🎮 Butoanele de jos</b><br>
+<b>🙋</b> — te bagi în joc (încă o dată = ieși)<br>
+<b>◀ ▶</b> — mergi · <b>ține apăsat</b> = fugi<br>
+<b>⤒</b> — salt · încă o dată în aer = <b>double jump</b><br>
+<b>⚡</b> — dash · <b>👊</b> — lovești (pumn → șut → final)<br>
+<i style="color:#9aa0b0">Ține ◀/▶ spre un perete ca să te agăți, apoi ⤒ = wall-jump.</i><br>
+<b>Iconițele de jos</b> — Chrome, Minecraft, Paint, Notepad…` : `<b style="color:#8ee6a0">🎮 Controalele tale</b><br>
 <b>R</b> — creează-ți personajul („TU")<br>
 <b>A / D</b> sau <b>← →</b> — mișcare<br>
 <b>Space</b> — salt · în aer = double jump · pe perete = <b>wall-jump</b><br>

@@ -11,8 +11,10 @@ html, body {
 #scene {
   display: block;
   width: 100vw;
-  height: 100vh;
+  height: 100dvh;                  /* dvh: nu intră sub bara browserului de pe telefon */
   background: #000;
+  touch-action: none;              /* degetul mișcă stickmani, nu pagina */
+  -webkit-tap-highlight-color: transparent;
 }
 
 #hint {
@@ -145,6 +147,52 @@ html, body {
 @media (max-width: 560px) {
   #expedBtn { left: 12px; bottom: 60px; }
   .exped-panel { left: 10px; right: 10px; width: auto; }
+}
+
+/* ---------- Telefon: comenzi pe ecran ---------- */
+/* Degetele stau jos, deci butoanele de chat/expediție urcă sus, iar comenzile
+   personajului tău stau deasupra taskbar-ului, în colțuri, ca la un gamepad. */
+#gamePad {
+  position: fixed; left: 0; right: 0; bottom: 96px; z-index: 42;
+  display: flex; justify-content: space-between; align-items: flex-end;
+  padding: 0 10px; pointer-events: none;   /* doar butoanele prind atingeri */
+}
+#gamePad .pad-move, #gamePad .pad-act { display: flex; gap: 10px; pointer-events: auto; }
+.pad-btn {
+  width: 58px; height: 58px; border-radius: 50%;
+  background: rgba(28, 32, 54, 0.72); color: #e8ecff;
+  border: 1px solid rgba(120, 132, 200, 0.5);
+  font-size: 22px; line-height: 1; font-family: "Segoe UI", system-ui, sans-serif;
+  display: flex; align-items: center; justify-content: center;
+  backdrop-filter: blur(3px); -webkit-tap-highlight-color: transparent;
+  touch-action: none; user-select: none; cursor: pointer;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+}
+.pad-btn.on { background: rgba(70, 84, 150, 0.95); transform: scale(0.94); }
+.pad-btn.run { border-color: #ffd27a; color: #ffd27a; }          /* ținut apăsat = fugă */
+.pad-btn.pad-jump { width: 66px; height: 66px; font-size: 26px; }
+.pad-btn.pad-me { font-size: 20px; opacity: 0.75; }
+.pad-btn.pad-me.live { opacity: 1; border-color: #8ee6a0; color: #8ee6a0; }
+
+/* telefoane înguste: 6 butoane rotunde nu încap la 58px, deci se micșorează */
+@media (max-width: 430px) {
+  #gamePad { padding: 0 8px; }
+  #gamePad .pad-move, #gamePad .pad-act { gap: 7px; }
+  .pad-btn { width: 49px; height: 49px; font-size: 19px; }
+  .pad-btn.pad-jump { width: 55px; height: 55px; font-size: 22px; }
+}
+
+/* pe ecrane mici butoanele de sus se mută în colțul din stânga-sus, ca să nu stea în drum */
+@media (pointer: coarse) and (max-width: 820px) {
+  #groupBtn { top: 10px; left: 10px; bottom: auto; padding: 8px 12px; font-size: 13px; }
+  #expedBtn { top: 10px; left: 104px; bottom: auto; padding: 8px 12px; font-size: 13px; }
+  .exped-panel { top: 54px; bottom: auto; }
+  /* dvh, nu vh: pe telefon bara de adrese apare/dispare și vh-ul minte */
+  .chat-panel, .chat-panel.group { height: 62dvh; max-height: calc(100dvh - 16px); bottom: 8px; }
+}
+@media (pointer: coarse) and (max-width: 430px) {
+  #groupBtn, #expedBtn { font-size: 12px; padding: 7px 10px; }
+  #expedBtn { left: 96px; }
 }
 
 .exped-screen { display: block; width: calc(100% - 24px); margin: 12px 12px 0; border-radius: 10px; background: #0e1024; border: 1px solid #2c3152; }

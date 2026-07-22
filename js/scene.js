@@ -1655,7 +1655,8 @@ function recXY(c, x, y) { const t = c.getTransform(); return [(t.a * x + t.c * y
     return oa.call(this, x, y, r, a0, a1, cc);
   };
 })();
-const HIT_PAD = 14;   // cât de departe de linia reală a modelului mai prinde click-ul
+const isTouch = matchMedia("(pointer: coarse)").matches || "ontouchstart" in window;
+const HIT_PAD = isTouch ? 26 : 14;   // cât de departe de linia reală a modelului mai prinde click-ul (degetul e mai gros decât cursorul)
 function segDist(px, py, x0, y0, x1, y1) { const dx = x1 - x0, dy = y1 - y0, l2 = dx * dx + dy * dy, t = l2 ? clamp(((px - x0) * dx + (py - y0) * dy) / l2, 0, 1) : 0; return Math.hypot(px - (x0 + t * dx), py - (y0 + t * dy)); }
 function hitDist(h, px, py) {  // distanța de la punct la cel mai apropiat os/cerc al modelului
   let d = 1e9;
@@ -3043,8 +3044,48 @@ function startFightBetween(a, b) {
   a.startFight(b);
   b.opponent = a; b.state = "fight"; b.stateTimer = a.stateTimer; b.attacker = false; b.speak(pick(b.c.fightLines), 90);
 }
-// touch: tap = lovitură (fără drag pt. simplitate)
-window.addEventListener("touchstart", (e) => { const t = e.touches[0]; if (t) { pointer.x = t.clientX; pointer.y = t.clientY; const a = nearestAgent(t.clientX, t.clientY); if (a) a.getHit(t.clientX); } }, { passive: true });
+// ================== TELEFON / TABLETĂ: degetul ține loc de mouse ==================
+// Nu dublăm logica de joc: traducem fiecare atingere în evenimentele de mouse pe care
+// jocul le știe deja (lovit, apucat & aruncat, mutat ferestre, desenat în Paint).
+// Ținut apăsat = click dreapta → deschide chatul. Două atingeri scurte = provocare.
+let touchId = null, touchTimer = 0, touchFrom = null, touchWasLong = false;
+function fireMouse(type, x, y) {
+  canvas.dispatchEvent(new MouseEvent(type, { clientX: x, clientY: y, button: 0, bubbles: true, cancelable: true }));
+}
+function findTouch(e) { for (const t of e.changedTouches) if (t.identifier === touchId) return t; return null; }
+canvas.addEventListener("touchstart", (e) => {
+  e.preventDefault();                       // oprește zoom-ul/scroll-ul și click-urile emulate de browser
+  if (touchId !== null) return;              // ne interesează un singur deget
+  const t = e.changedTouches[0];
+  touchId = t.identifier; touchWasLong = false; touchFrom = { x: t.clientX, y: t.clientY };
+  fireMouse("mousemove", t.clientX, t.clientY);   // degetul „apare" direct pe ecran: fără asta jocul ar folosi ultima poziție
+  fireMouse("mousedown", t.clientX, t.clientY);
+  clearTimeout(touchTimer);
+  touchTimer = setTimeout(() => {            // ținut pe loc ~0.45s = „click dreapta"
+    if (pointer.grabbed) return;             // deja îl ține în mână → e o mutare, nu o apăsare lungă
+    touchWasLong = true;
+    const who = pointer.cand;                // pe cine ai pus degetul, chiar dacă între timp a mai făcut doi pași
+    pointer.down = false; pointer.cand = null; pointer.dragStruct = null;
+    if (who && window.openChat) window.openChat(who);
+    else canvas.dispatchEvent(new MouseEvent("contextmenu", { clientX: touchFrom.x, clientY: touchFrom.y, bubbles: true, cancelable: true }));
+    if (navigator.vibrate) navigator.vibrate(15);
+  }, 450);
+}, { passive: false });
+canvas.addEventListener("touchmove", (e) => {
+  const t = findTouch(e); if (!t) return;
+  e.preventDefault();
+  if (Math.hypot(t.clientX - touchFrom.x, t.clientY - touchFrom.y) > 10) clearTimeout(touchTimer);  // s-a mișcat → nu mai e apăsare lungă
+  fireMouse("mousemove", t.clientX, t.clientY);
+}, { passive: false });
+function endTouch(e) {
+  const t = findTouch(e); if (!t) return;
+  e.preventDefault();
+  clearTimeout(touchTimer); touchId = null;
+  if (touchWasLong) { pointer.down = false; pointer.cand = null; return; }   // s-a deschis deja chatul
+  fireMouse("mouseup", t.clientX, t.clientY);   // fără mousemove înainte: viteza de aruncare vine din ultima mișcare reală
+}
+canvas.addEventListener("touchend", endTouch, { passive: false });
+canvas.addEventListener("touchcancel", endTouch, { passive: false });
 window.addEventListener("contextmenu", (e) => { e.preventDefault(); if (minecraftWin && e.clientX >= minecraftWin.x && e.clientX <= minecraftWin.x + minecraftWin.w && e.clientY >= minecraftWin.y && e.clientY <= minecraftWin.y + minecraftWin.h) { mcPlaceAt(e.clientX, e.clientY); return; } const a = nearestAgent(e.clientX, e.clientY); if (a && window.openChat) window.openChat(a); });
 
 // aventură
@@ -3187,6 +3228,58 @@ window.addEventListener("keydown", (e) => {
 });
 window.addEventListener("keyup", (e) => { keys.delete(e.key.toLowerCase()); sprintHeld = e.ctrlKey; });
 window.addEventListener("blur", () => { keys.clear(); sprintHeld = false; }); // pierde focusul → nu rămâne blocat pe sprint/mers
+
+// ---- comenzi pe ecran (telefon): fac exact ce fac tastele ----
+// Ținut pe ◀/▶ mai mult de o jumătate de secundă = sprint (nu ai Ctrl pe telefon).
+if (isTouch) {
+  const pad = document.createElement("div");
+  pad.id = "gamePad";
+  pad.innerHTML = `
+    <div class="pad-move">
+      <button class="pad-btn" data-move="left" aria-label="stânga">◀</button>
+      <button class="pad-btn" data-move="right" aria-label="dreapta">▶</button>
+    </div>
+    <div class="pad-act">
+      <button class="pad-btn pad-me" data-act="me" aria-label="personajul tău">🙋</button>
+      <button class="pad-btn" data-act="dash" aria-label="dash">⚡</button>
+      <button class="pad-btn" data-act="hit" aria-label="lovește">👊</button>
+      <button class="pad-btn pad-jump" data-act="jump" aria-label="salt">⤒</button>
+    </div>`;
+  document.body.appendChild(pad);
+  const KEY = { left: "a", right: "d" };
+  let sprintTimer = 0;
+  const press = (b, on) => { b.classList.toggle("on", on); if (on && navigator.vibrate) navigator.vibrate(8); };
+  for (const b of pad.querySelectorAll("[data-move]")) {
+    const k = KEY[b.dataset.move];
+    const start = (e) => {
+      e.preventDefault(); keys.add(k); press(b, true);
+      clearTimeout(sprintTimer); sprintTimer = setTimeout(() => { sprintHeld = true; b.classList.add("run"); }, 500);
+    };
+    const stop = (e) => {
+      e.preventDefault(); keys.delete(k); press(b, false);
+      clearTimeout(sprintTimer); sprintHeld = false; b.classList.remove("run");
+    };
+    b.addEventListener("touchstart", start, { passive: false });
+    b.addEventListener("touchend", stop, { passive: false });
+    b.addEventListener("touchcancel", stop, { passive: false });
+  }
+  for (const b of pad.querySelectorAll("[data-act]")) {
+    b.addEventListener("touchstart", (e) => {
+      e.preventDefault(); press(b, true);
+      const a = b.dataset.act;
+      if (a === "me") { if (player) removePlayers(); else spawnPlayer(); }
+      else if (!player) spawnPlayer();                    // apeși sări/lovește fără personaj → ți-l face pe loc
+      else if (a === "jump") player.wantJump = true;
+      else if (a === "hit") player.wantAttack = true;
+      else if (a === "dash") player.wantDash = true;
+    }, { passive: false });
+    const up = (e) => { e.preventDefault(); press(b, false); };
+    b.addEventListener("touchend", up, { passive: false });
+    b.addEventListener("touchcancel", up, { passive: false });
+  }
+  // butonul „eu" arată dacă ai sau nu personaj în joc
+  setInterval(() => pad.querySelector(".pad-me").classList.toggle("live", !!player), 400);
+}
 // bară de viață deasupra capului — apare doar când se bat / tocmai au încasat
 function drawHpBar(a) {
   if (a.away || a.hpShow <= 0 || a.state === "held") return;
@@ -3254,8 +3347,9 @@ function drawTaskbar() {
   ctx.fillStyle = "#191b24"; ctx.fillRect(0, groundY, W, bh);
   ctx.strokeStyle = "rgba(255,255,255,0.18)"; ctx.lineWidth = 2;
   ctx.beginPath(); ctx.moveTo(0, groundY); ctx.lineTo(W, groundY); ctx.stroke();
-  const s = Math.min(48, bh - 30);
   const icons = [["search", drawSearchIcon], ["chrome", drawChromeIcon], ["minecraft", drawMinecraftIcon], ["lol", drawLoLIcon], ["stopwatch", drawStopwatchIcon], ["settings", drawSettingsIcon], ["notepad", drawNotepadIcon], ["paint", drawPaintIcon]];
+  // pe telefon nu încap 8 iconițe la 48px → se micșorează cât să intre între Start și ceas
+  const s = Math.max(22, Math.min(48, bh - 30, (W - 130) / (icons.length * 1.55)));
   const gap = s * 0.55;
   const totalW = icons.length * s + (icons.length - 1) * gap;
   const cy = groundY + bh / 2 + 2;
@@ -3279,8 +3373,8 @@ function drawClock(rx, cy) {
   const time = String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0");
   const date = String(d.getDate()).padStart(2, "0") + "." + String(d.getMonth() + 1).padStart(2, "0") + "." + d.getFullYear();
   ctx.save(); ctx.textAlign = "right";
-  ctx.fillStyle = "#e8ecff"; ctx.font = "13px 'Segoe UI', sans-serif"; ctx.fillText(time, rx, cy - 1);
-  ctx.fillStyle = "#9aa0b0"; ctx.font = "11px 'Segoe UI', sans-serif"; ctx.fillText(date, rx, cy + 14);
+  ctx.fillStyle = "#e8ecff"; ctx.font = "13px 'Segoe UI', sans-serif"; ctx.fillText(time, rx, W < 620 ? cy + 5 : cy - 1);
+  if (W >= 620) { ctx.fillStyle = "#9aa0b0"; ctx.font = "11px 'Segoe UI', sans-serif"; ctx.fillText(date, rx, cy + 14); }   // pe telefon: doar ora
   ctx.restore();
 }
 function iconBg(cx, cy, s, fill) { ctx.fillStyle = fill; ctx.beginPath(); if (ctx.roundRect) { ctx.roundRect(cx - s / 2, cy - s / 2, s, s, s * 0.22); } else { ctx.rect(cx - s / 2, cy - s / 2, s, s); } ctx.fill(); }
