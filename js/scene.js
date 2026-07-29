@@ -1236,7 +1236,7 @@ class Agent {
     }
     // urme de dash (afterimages) — siluetă simplă în pozițiile prin care tocmai a trecut
     if (this.ghosts && this.ghosts.length) {
-      ctx.save(); ctx.strokeStyle = c.color; ctx.lineWidth = 3.5; ctx.lineCap = "round"; ctx.lineJoin = "round";
+      ctx.save(); ctx.strokeStyle = c.color; ctx.lineWidth = 5; ctx.lineCap = "round"; ctx.lineJoin = "round";
       for (const g of this.ghosts) {
         const y = groundY - g.tz, f = g.f;
         ctx.globalAlpha = g.a * 0.5;
@@ -1293,7 +1293,7 @@ class Agent {
     const col = this.hitFlash > 0 && this.hitFlash % 2 === 0 ? "#ffffff" : c.color;  // clipește alb când încasează
     ctx.strokeStyle = col; ctx.fillStyle = col;
     if (this.hitFlash > 0) { ctx.shadowColor = "#ffffff"; ctx.shadowBlur = 12; }
-    ctx.lineWidth = 4.5; ctx.lineCap = "round"; ctx.lineJoin = "round"; // linii mai subțiri (nu prea groase)
+    ctx.lineWidth = 6.2; ctx.lineCap = "round"; ctx.lineJoin = "round"; // linii groase, ca la Alan Becker (se citesc bine de departe)
 
     skelRec = { pts: [], segs: [], circles: [], last: null };   // înregistrează geometria reală
     this.drawSkeleton(ctx);
@@ -1302,7 +1302,7 @@ class Agent {
     if (rec.pts.length) {
       let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
       for (const p of rec.pts) { if (p[0] < x0) x0 = p[0]; if (p[0] > x1) x1 = p[0]; if (p[1] < y0) y0 = p[1]; if (p[1] > y1) y1 = p[1]; }
-      const lw = 2.4; // jumătate din grosimea liniei — cutia cuprinde și marginea trasului
+      const lw = 3.1; // jumătate din grosimea liniei — cutia cuprinde și marginea trasului
       this.hit = { x0: x0 - lw, y0: y0 - lw, x1: x1 + lw, y1: y1 + lw, segs: rec.segs, circles: rec.circles };
     }
 
@@ -1462,11 +1462,12 @@ class Agent {
       const amt = (running ? 0.95 : 0.62) * moveAmt;
       for (const side of [-1, 1]) {
         const p = this.walkPhase + (side < 0 ? Math.PI : 0);
-        const ang = Math.sin(p) * amt;
+        // la stat brațele se depărtează de trunchi printr-un UNGHI din umăr (nu translatate) → rămân lipite de corp
+        const spread = side * 0.40 * (1 - moveAmt);
+        const ang = Math.sin(p) * amt + spread;
         const ex = Math.sin(ang) * UPPER, ey = Math.cos(ang) * UPPER;
-        const fa = (ang + 0.35 + Math.max(0, Math.sin(p)) * 0.45) * moveAmt; // cotul se îndoaie doar la mers; la stat antebrațul e vertical
-        const ox = side * 7 * (1 - moveAmt);                                 // umeri ușor depărtați la stat (să nu intre brațele în trunchi)
-        ctx.beginPath(); ctx.moveTo(shX + ox, asY); ctx.lineTo(shX + ox + ex, asY + ey); ctx.lineTo(shX + ox + ex + Math.sin(fa) * FORE, asY + ey + Math.cos(fa) * FORE); ctx.stroke();
+        const fa = ang - spread * 0.25 + (0.35 + Math.max(0, Math.sin(p)) * 0.45) * moveAmt; // cotul se îndoaie doar la mers; la stat brațul cade drept, ușor depărtat
+        ctx.beginPath(); ctx.moveTo(shX, asY); ctx.lineTo(shX + ex, asY + ey); ctx.lineTo(shX + ex + Math.sin(fa) * FORE, asY + ey + Math.cos(fa) * FORE); ctx.stroke();
       }
     }
 
